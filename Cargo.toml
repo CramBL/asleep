@@ -1,0 +1,50 @@
+[package]
+name = "asleep"
+version = "0.1.0"
+edition = "2024"
+authors = ["Marc Beck König <mgit@tuta.io>"]
+exclude = [".github", "scripts"]
+repository = "https://github.com/CramBL/asleep"
+homepage = "https://github.com/CramBL/asleep"
+description = "An advanced suspend-aware sleep utility with live countdown and flexible datetime parsing"
+keywords = ["sleep", "suspend", "cli", "timer", "utility"]
+categories = ["command-line-utilities"]
+license = "GPL-3.0-or-later"
+rust-version = "1.85.1"
+
+
+[package.metadata.wix]
+upgrade-guid = "7030262C-F4F9-4A83-9704-9F5444432618"
+path-guid = "B7681282-9534-4624-9286-01F1403EE5AD"
+license = false
+eula = false
+
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.186"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Time", "Win32_System_Console"] }
+
+
+[dev-dependencies]
+chrono = "0.4.44"
+assert_cmd = "2.0"
+predicates = "3.1"
+nix = { version = "0.31", features = ["signal"] }
+
+[profile.release]
+opt-level = "z"
+debug = false
+panic = "abort"
+strip = true
+lto = true
+codegen-units = 1
+incremental = false
+overflow-checks = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
