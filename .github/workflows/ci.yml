@@ -123,3 +123,48 @@ jobs:
       - run: just test-alpine
         env:
           CONTAINER_RUNNER: docker
+
+  tag-release:
+    name: Tag Release
+    needs:
+      - format
+      - typos
+      - clippy
+      - test
+      - shell-test
+      - docker-debian
+      - docker-alpine
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/trunk'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.ASLEEP_WITH_REPO_SCOPE }}
+
+      - name: Get version from Cargo.toml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "v${{ env.VERSION }}" >/dev/null 2>&1; then
+            echo "Tag already exists"
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "Tag does not exist"
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create and push tag
+        if: env.TAG_EXISTS == 'false'
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
+          git push origin "v${{ env.VERSION }}"
