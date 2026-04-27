@@ -23,6 +23,10 @@ An advanced, suspend-aware, and GNU sleep-compatible sleep utility with live cou
 - **Sleep Until**: Support for sleeping until a specific datetime.
 - **Zero dependencies**: ... Except for the platforms C runtime for signal handling.
 
+## Demo
+
+![asleep demo](docs/demo.gif)
+
 ## Usage
 ```bash
 asleep 1h30m
