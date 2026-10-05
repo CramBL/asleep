@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y \
     libc6-dev \
     gcc \
     make \
-    &> /dev/null
+    > /dev/null 2>&1
 
 WORKDIR /app
 COPY . .
