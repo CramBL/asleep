@@ -1,5 +1,11 @@
+use crate::datetime::{DateTime, to_unix_timestamp};
+
 pub fn utc_offset_seconds() -> i32 {
     imp::utc_offset_seconds()
+}
+
+pub fn utc_offset_seconds_at(dt: DateTime) -> Option<i32> {
+    imp::utc_offset_seconds_at(dt)
 }
 
 pub fn utc_offset_hours() -> i32 {
@@ -8,6 +14,8 @@ pub fn utc_offset_hours() -> i32 {
 
 #[cfg(unix)]
 mod imp {
+    use super::*;
+
     pub fn utc_offset_seconds() -> i32 {
         let mut now = 0; // time_t/i64 (use type-inference for infinite compatibility :))
         // SAFETY: libc::time is safe when passed a valid pointer or mut reference to a time_t.
@@ -64,12 +72,48 @@ mod imp {
             (local_time - utc_time) as i32
         }
     }
+
+    pub fn utc_offset_seconds_at(dt: DateTime) -> Option<i32> {
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        tm.tm_year = dt.year.0.checked_sub(1900)?;
+        tm.tm_mon = i32::from(dt.month.0).checked_sub(1)?;
+        tm.tm_mday = i32::from(dt.day.0);
+        tm.tm_hour = i32::from(dt.hour.0);
+        tm.tm_min = i32::from(dt.minute.0);
+        tm.tm_sec = i32::from(dt.second.0);
+        tm.tm_isdst = -1;
+
+        // SAFETY: libc::mktime is safe when passed a valid mutable reference to a tm struct.
+        // Setting tm_isdst to -1 asks the C runtime to determine DST for this local datetime.
+        let timestamp = unsafe { libc::mktime(&mut tm) };
+        if timestamp == -1 {
+            return None;
+        }
+
+        // mktime may normalize nonexistent local times (for example, during a spring-forward
+        // transition). Treat those as invalid rather than silently changing the requested time.
+        if tm.tm_year != dt.year.0 - 1900
+            || tm.tm_mon != i32::from(dt.month.0) - 1
+            || tm.tm_mday != i32::from(dt.day.0)
+            || tm.tm_hour != i32::from(dt.hour.0)
+            || tm.tm_min != i32::from(dt.minute.0)
+            || tm.tm_sec != i32::from(dt.second.0)
+        {
+            return None;
+        }
+
+        let local_as_utc = i128::from(to_unix_timestamp(dt));
+        let offset = local_as_utc.checked_sub(timestamp as i128)?;
+        i32::try_from(offset).ok()
+    }
 }
 
 #[cfg(windows)]
 mod imp {
+    use super::*;
     use windows_sys::Win32::System::Time::{
-        GetDynamicTimeZoneInformation, GetTimeZoneInformation, TIME_ZONE_ID_INVALID,
+        DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation, GetTimeZoneInformation,
+        SYSTEMTIME, TIME_ZONE_ID_INVALID, TzSpecificLocalTimeToSystemTimeEx,
     };
 
     pub fn utc_offset_seconds() -> i32 {
@@ -101,6 +145,46 @@ mod imp {
         }
 
         0
+    }
+
+    pub fn utc_offset_seconds_at(dt: DateTime) -> Option<i32> {
+        let local = SYSTEMTIME {
+            wYear: u16::try_from(dt.year.0).ok()?,
+            wMonth: u16::from(dt.month.0),
+            wDayOfWeek: 0,
+            wDay: u16::from(dt.day.0),
+            wHour: u16::from(dt.hour.0),
+            wMinute: u16::from(dt.minute.0),
+            wSecond: u16::from(dt.second.0),
+            wMilliseconds: 0,
+        };
+        let mut utc: SYSTEMTIME = unsafe { std::mem::zeroed() };
+
+        // SAFETY: A null timezone pointer selects the current system timezone. Both SYSTEMTIME
+        // pointers are valid for the duration of the call.
+        if unsafe {
+            TzSpecificLocalTimeToSystemTimeEx(
+                std::ptr::null::<DYNAMIC_TIME_ZONE_INFORMATION>(),
+                &local,
+                &mut utc,
+            )
+        } == 0
+        {
+            return None;
+        }
+
+        let utc_dt = DateTime {
+            year: crate::datetime::Year(i32::from(utc.wYear)),
+            month: crate::datetime::Month(u8::try_from(utc.wMonth).ok()?),
+            day: crate::datetime::Day(u8::try_from(utc.wDay).ok()?),
+            hour: crate::datetime::Hour24(u8::try_from(utc.wHour).ok()?),
+            minute: crate::datetime::Minute(u8::try_from(utc.wMinute).ok()?),
+            second: crate::datetime::Second(u8::try_from(utc.wSecond).ok()?),
+        };
+        let local_as_utc = to_unix_timestamp(dt);
+        let utc_timestamp = to_unix_timestamp(utc_dt);
+        let offset = i128::from(local_as_utc).checked_sub(i128::from(utc_timestamp))?;
+        i32::try_from(offset).ok()
     }
 }
 
