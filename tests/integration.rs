@@ -39,6 +39,42 @@ fn test_invalid_duration() {
 }
 
 #[test]
+fn test_huge_timestamp_returns_error() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["--until", "@18446744073709551615"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Datetime is out of range"));
+}
+
+#[test]
+fn test_multiple_duration_overflow_returns_error() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["18446744073709551615s", "1s", "--no-progress"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Duration overflow"));
+}
+
+#[test]
+fn test_sleep_deadline_overflow_returns_error() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["18446744073709551615s", "--no-progress"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Sleep duration is out of range"));
+}
+
+#[test]
+fn test_monotonic_deadline_overflow_returns_error() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["18446744073709551615s", "--monotonic", "--no-progress"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Sleep duration is out of range"));
+}
+
+#[test]
 fn test_duration_sleep() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
     let now = std::time::Instant::now();

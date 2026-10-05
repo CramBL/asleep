@@ -2,7 +2,7 @@ use crate::args::Config;
 use crate::display::{TerminalGuard, update_progress_seconds};
 use crate::duration::Seconds;
 use crate::signal;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -13,8 +13,17 @@ pub fn run_sleep(config: Config) -> i32 {
         show_progress,
         suspend_aware,
     } = config;
-    let deadline_wall = SystemTime::now() + duration;
-    let deadline_mono = Instant::now() + duration;
+    let deadline = if suspend_aware {
+        match SystemTime::now().checked_add(duration) {
+            Some(deadline) => Deadline::Wall(deadline),
+            None => return deadline_overflow(),
+        }
+    } else {
+        match Instant::now().checked_add(duration) {
+            Some(deadline) => Deadline::Monotonic(deadline),
+            None => return deadline_overflow(),
+        }
+    };
 
     let is_tty = std::io::stdout().is_terminal();
     let _guard = if show_progress && is_tty {
@@ -36,14 +45,13 @@ pub fn run_sleep(config: Config) -> i32 {
             break;
         }
 
-        let remaining = if suspend_aware {
-            deadline_wall
+        let remaining = match deadline {
+            Deadline::Wall(deadline) => deadline
                 .duration_since(SystemTime::now())
-                .unwrap_or(Duration::ZERO)
-        } else {
-            deadline_mono
+                .unwrap_or(Duration::ZERO),
+            Deadline::Monotonic(deadline) => deadline
                 .checked_duration_since(Instant::now())
-                .unwrap_or(Duration::ZERO)
+                .unwrap_or(Duration::ZERO),
         };
 
         if remaining.is_zero() {
@@ -62,4 +70,15 @@ pub fn run_sleep(config: Config) -> i32 {
         thread::sleep(sleep_time);
     }
     exit_code
+}
+
+enum Deadline {
+    Wall(SystemTime),
+    Monotonic(Instant),
+}
+
+fn deadline_overflow() -> i32 {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(b"Error: Sleep duration is out of range\n");
+    1
 }
