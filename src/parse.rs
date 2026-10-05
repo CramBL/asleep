@@ -70,6 +70,11 @@ fn parse_u64(s: &str) -> Option<u64> {
     Some(res)
 }
 
+fn parse_u8(s: &str) -> Result<u8, ParseDateTimeError> {
+    let value = parse_u64(s).ok_or(ParseDateTimeError::InvalidFormat)?;
+    u8::try_from(value).map_err(|_| ParseDateTimeError::InvalidValue)
+}
+
 pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
     let s = s.trim();
     if s.is_empty() {
@@ -160,10 +165,8 @@ where
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
         let year = parse_u64(s.get(0..4).ok_or(ParseDateTimeError::InvalidFormat)?)
             .ok_or(ParseDateTimeError::InvalidFormat)? as i32;
-        let month = parse_u64(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)
-            .ok_or(ParseDateTimeError::InvalidFormat)? as u8;
-        let day = parse_u64(s.get(8..10).ok_or(ParseDateTimeError::InvalidFormat)?)
-            .ok_or(ParseDateTimeError::InvalidFormat)? as u8;
+        let month = parse_u8(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)?;
+        let day = parse_u8(s.get(8..10).ok_or(ParseDateTimeError::InvalidFormat)?)?;
 
         let (h, min, sec, target_offset) = if s.len() > 11 {
             let time_part = s.get(11..).ok_or(ParseDateTimeError::InvalidFormat)?;
@@ -345,9 +348,9 @@ fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDat
         return Err(ParseDateTimeError::InvalidFormat);
     }
 
-    let h_raw = parse_u64(h_str).ok_or(ParseDateTimeError::InvalidFormat)? as u8;
+    let h_raw = parse_u8(h_str)?;
     let m = if let Some(m_val) = m_str {
-        parse_u64(m_val).ok_or(ParseDateTimeError::InvalidFormat)? as u8
+        parse_u8(m_val)?
     } else {
         // Minutes are optional ONLY if am/pm is provided
         if am_pm.is_none() {
@@ -356,7 +359,7 @@ fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDat
         0
     };
     let s = if let Some(s_val) = s_str {
-        parse_u64(s_val).ok_or(ParseDateTimeError::InvalidFormat)? as u8
+        parse_u8(s_val)?
     } else {
         0
     };
@@ -547,6 +550,13 @@ mod tests {
             target_utc.duration_since(UNIX_EPOCH).unwrap().as_secs(),
             expected
         );
+    }
+
+    #[test]
+    fn test_parse_datetime_rejects_wrapped_time_fields() {
+        assert!(parse_datetime("256:30", UNIX_EPOCH).is_err());
+        assert!(parse_datetime("12:256", UNIX_EPOCH).is_err());
+        assert!(parse_datetime("12:00:256", UNIX_EPOCH).is_err());
     }
 
     #[test]
