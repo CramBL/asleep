@@ -6,12 +6,13 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-BINARY=$1
-if [ -z "$BINARY" ]; then
-    echo "Usage: $0 <path-to-binary>"
+TARGET_DIR=$(cargo metadata --format-version=1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+if [ -z "$TARGET_DIR" ]; then
+    echo -e "${RED}Error: Could not resolve Cargo target directory${NC}"
     exit 1
 fi
 
+BINARY="$TARGET_DIR/debug/asleep"
 if [ ! -f "$BINARY" ]; then
     echo -e "${RED}Error: Binary not found at $BINARY${NC}"
     exit 1
@@ -29,11 +30,11 @@ pass() {
 }
 
 # Test: Help output
-$BINARY --help | grep -q "Usage: asleep" || fail "Help output should contain usage"
+"$BINARY" --help | grep -q "Usage: asleep" || fail "Help output should contain usage"
 pass "Help output"
 
 # Test: Invalid duration exit code and message
-output=$($BINARY invalid 2>&1 || true)
+output=$("$BINARY" invalid 2>&1 || true)
 if echo "$output" | grep -q "Error parsing duration"; then
     pass "Invalid duration handled"
 else
@@ -43,18 +44,18 @@ fi
 # Test: Sleep duration (roughly)
 # We use @ as start to avoid sub-second issues with date +%s
 start=$(date +%s)
-$BINARY 2s --no-progress || fail "Sleep 2s failed"
+"$BINARY" 2s --no-progress || fail "Sleep 2s failed"
 end=$(date +%s)
 elapsed=$((end - start))
 
-if [ $elapsed -ge 2 ] && [ $elapsed -le 4 ]; then
+if [ "$elapsed" -ge 2 ] && [ "$elapsed" -le 4 ]; then
     pass "Sleep duration (elapsed: ${elapsed}s)"
 else
     fail "Sleep duration was out of expected range (elapsed: ${elapsed}s)"
 fi
 
 # Test: Until past
-output=$($BINARY --until "@0" 2>&1 || true)
+output=$("$BINARY" --until "@0" 2>&1 || true)
 if echo "$output" | grep -q "in the past"; then
     pass "Past --until handled"
 else
@@ -62,7 +63,7 @@ else
 fi
 
 # Test: --no-progress flag
-output=$($BINARY 1s --no-progress 2>/dev/null)
+output=$("$BINARY" 1s --no-progress 2>/dev/null)
 if [ -z "$output" ]; then
     pass "No progress flag respected"
 else
@@ -70,19 +71,19 @@ else
 fi
 
 # Test: --monotonic flag
-$BINARY 1s --monotonic || fail "--monotonic failed"
+"$BINARY" 1s --monotonic || fail "--monotonic failed"
 pass "--monotonic flag works"
 
 # Test: -m flag
-$BINARY 1s -m || fail "-m failed"
+"$BINARY" 1s -m || fail "-m failed"
 pass "-m flag works"
 
 # Test: Multiple durations summing
 start=$(date +%s)
-$BINARY 1s 2s 1s --no-progress || fail "Multiple durations failed"
+"$BINARY" 1s 2s 1s --no-progress || fail "Multiple durations failed"
 end=$(date +%s)
 elapsed=$((end - start))
-if [ $elapsed -ge 4 ] && [ $elapsed -le 6 ]; then
+if [ "$elapsed" -ge 4 ] && [ "$elapsed" -le 6 ]; then
     pass "Multiple durations summed correctly (elapsed: ${elapsed}s)"
 else
     fail "Multiple durations summing out of range (elapsed: ${elapsed}s)"

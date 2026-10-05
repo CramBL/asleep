@@ -2,7 +2,7 @@ use crate::datetime::{
     DateTime, Day, Hour24, Minute, Month, Second, Year, from_unix_timestamp, to_unix_timestamp,
 };
 use crate::duration::{Days, Hours, Minutes, Seconds};
-use crate::utc_offset::utc_offset_seconds;
+use crate::utc_offset::utc_offset_seconds_at;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,6 +122,19 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
 }
 
 pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateTimeError> {
+    parse_datetime_with(s, now, |dt| {
+        utc_offset_seconds_at(dt).ok_or(ParseDateTimeError::InvalidValue)
+    })
+}
+
+pub fn parse_datetime_with<F>(
+    s: &str,
+    now: SystemTime,
+    mut utc_offset_at: F,
+) -> Result<SystemTime, ParseDateTimeError>
+where
+    F: FnMut(DateTime) -> Result<i32, ParseDateTimeError>,
+{
     let s = s.trim();
     if s.is_empty() {
         return Err(ParseDateTimeError::InvalidFormat);
@@ -131,18 +144,17 @@ pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateT
         return parse_unix_timestamp(now, ts_str);
     }
 
-    let local_offset = utc_offset_seconds() as i64;
     let now_ts_utc = now
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ParseDateTimeError::InvalidValue)?
         .as_secs();
 
     if s == "tomorrow" {
-        return Ok(tomorrow_time(local_offset, now_ts_utc));
+        return target_tomorrow_time(now_ts_utc, "00:00", &mut utc_offset_at);
     }
 
     if let Some(time_part) = s.strip_prefix("tomorrow ") {
-        return target_tomorrow_time(local_offset, now_ts_utc, time_part);
+        return target_tomorrow_time(now_ts_utc, time_part, &mut utc_offset_at);
     }
 
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
@@ -159,19 +171,16 @@ pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateT
         let y = Year(year);
         let m = Month::new(month).ok_or(ParseDateTimeError::InvalidValue)?;
         let d = Day::new(day, y, m).ok_or(ParseDateTimeError::InvalidValue)?;
+        let target_dt = DateTime {
+            year: y,
+            month: m,
+            day: d,
+            hour: h,
+            minute: min,
+            second: sec,
+        };
 
-        let ts_utc = target_to_utc(
-            DateTime {
-                year: y,
-                month: m,
-                day: d,
-                hour: h,
-                minute: min,
-                second: sec,
-            },
-            target_offset,
-            local_offset,
-        );
+        let ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
         let target = UNIX_EPOCH + Duration::from_secs(ts_utc);
         if target <= now {
             return Err(ParseDateTimeError::PastTime);
@@ -180,23 +189,23 @@ pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateT
     }
 
     if let Ok((h, min, sec, target_offset)) = parse_time(s) {
-        let used_offset = target_offset.unwrap_or(local_offset as i32) as i64;
-        let now_ts_target = (now_ts_utc as i64 + used_offset) as u64;
-        let dt = from_unix_timestamp(now_ts_target);
+        let current_dt = match target_offset {
+            Some(offset) => datetime_at_offset(now_ts_utc, offset)?,
+            None => local_datetime_at(now_ts_utc, &mut utc_offset_at)?,
+        };
+        let mut target_dt = DateTime {
+            hour: h,
+            minute: min,
+            second: sec,
+            ..current_dt
+        };
 
-        let ts_utc = target_to_utc(
-            DateTime {
-                hour: h,
-                minute: min,
-                second: sec,
-                ..dt
-            },
-            target_offset,
-            local_offset,
-        );
+        let mut ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
         let mut target = UNIX_EPOCH + Duration::from_secs(ts_utc);
         if target <= now {
-            target += Duration::from_secs(86400);
+            target_dt = next_calendar_day(target_dt)?;
+            ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
+            target = UNIX_EPOCH + Duration::from_secs(ts_utc);
         }
         return Ok(target);
     }
@@ -204,45 +213,65 @@ pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateT
     Err(ParseDateTimeError::InvalidFormat)
 }
 
-fn target_tomorrow_time(
-    local_offset: i64,
+fn target_tomorrow_time<F>(
     now_ts_utc: u64,
     time_part: &str,
-) -> Result<SystemTime, ParseDateTimeError> {
+    utc_offset_at: &mut F,
+) -> Result<SystemTime, ParseDateTimeError>
+where
+    F: FnMut(DateTime) -> Result<i32, ParseDateTimeError>,
+{
     let (h, min, sec, target_offset) = parse_time(time_part)?;
-    let used_offset = target_offset.unwrap_or(local_offset as i32) as i64;
-    let now_ts_target = (now_ts_utc as i64 + used_offset) as u64;
-    let target_ts_target = now_ts_target + 86400;
-    let dt = from_unix_timestamp(target_ts_target);
-    let target_as_utc = target_to_utc(
-        DateTime {
-            hour: h,
-            minute: min,
-            second: sec,
-            ..dt
-        },
-        target_offset,
-        local_offset,
-    );
-    let target_time = UNIX_EPOCH + Duration::from_secs(target_as_utc);
-    Ok(target_time)
+    let current_dt = match target_offset {
+        Some(offset) => datetime_at_offset(now_ts_utc, offset)?,
+        None => local_datetime_at(now_ts_utc, utc_offset_at)?,
+    };
+    let tomorrow = next_calendar_day(current_dt)?;
+    let target_dt = DateTime {
+        hour: h,
+        minute: min,
+        second: sec,
+        ..tomorrow
+    };
+    let target_as_utc = target_to_utc(target_dt, target_offset, utc_offset_at)?;
+    Ok(UNIX_EPOCH + Duration::from_secs(target_as_utc))
 }
 
-fn tomorrow_time(local_offset: i64, now_ts_utc: u64) -> SystemTime {
-    let now_ts_local = (now_ts_utc as i64 + local_offset) as u64;
-    let target_ts_local = now_ts_local + 86400;
-    let dt = from_unix_timestamp(target_ts_local);
-    let target_as_utc = target_to_utc(
-        DateTime {
-            hour: Hour24(0),
-            minute: Minute(0),
-            second: Second(0),
-            ..dt
-        },
-        None,
-        local_offset,
-    );
-    UNIX_EPOCH + Duration::from_secs(target_as_utc)
+fn local_datetime_at<F>(
+    now_ts_utc: u64,
+    utc_offset_at: &mut F,
+) -> Result<DateTime, ParseDateTimeError>
+where
+    F: FnMut(DateTime) -> Result<i32, ParseDateTimeError>,
+{
+    let utc_dt = from_unix_timestamp(now_ts_utc);
+    let initial_offset = utc_offset_at(utc_dt)?;
+    let initial_local = datetime_at_offset(now_ts_utc, initial_offset)?;
+    let resolved_offset = utc_offset_at(initial_local)?;
+
+    if resolved_offset == initial_offset {
+        Ok(initial_local)
+    } else {
+        datetime_at_offset(now_ts_utc, resolved_offset)
+    }
+}
+
+fn datetime_at_offset(ts_utc: u64, offset: i32) -> Result<DateTime, ParseDateTimeError> {
+    let shifted = if offset >= 0 {
+        ts_utc.checked_add(offset as u64)
+    } else {
+        ts_utc.checked_sub(offset.unsigned_abs() as u64)
+    }
+    .ok_or(ParseDateTimeError::InvalidValue)?;
+
+    Ok(from_unix_timestamp(shifted))
+}
+
+fn next_calendar_day(dt: DateTime) -> Result<DateTime, ParseDateTimeError> {
+    let next = to_unix_timestamp(dt)
+        .checked_add(86400)
+        .ok_or(ParseDateTimeError::InvalidValue)?;
+    Ok(from_unix_timestamp(next))
 }
 
 fn parse_unix_timestamp(now: SystemTime, ts_str: &str) -> Result<SystemTime, ParseDateTimeError> {
@@ -254,10 +283,29 @@ fn parse_unix_timestamp(now: SystemTime, ts_str: &str) -> Result<SystemTime, Par
     Ok(target)
 }
 
-fn target_to_utc(dt: DateTime, target_offset: Option<i32>, local_offset: i64) -> u64 {
+fn target_to_utc<F>(
+    dt: DateTime,
+    target_offset: Option<i32>,
+    utc_offset_at: &mut F,
+) -> Result<u64, ParseDateTimeError>
+where
+    F: FnMut(DateTime) -> Result<i32, ParseDateTimeError>,
+{
     let ts_target = to_unix_timestamp(dt);
-    let used_offset = target_offset.unwrap_or(local_offset as i32) as i64;
-    (ts_target as i64 - used_offset) as u64
+    let used_offset = match target_offset {
+        Some(offset) => offset,
+        None => utc_offset_at(dt)?,
+    };
+
+    if used_offset >= 0 {
+        ts_target
+            .checked_sub(used_offset as u64)
+            .ok_or(ParseDateTimeError::InvalidValue)
+    } else {
+        ts_target
+            .checked_add(used_offset.unsigned_abs() as u64)
+            .ok_or(ParseDateTimeError::InvalidValue)
+    }
 }
 
 fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDateTimeError> {
@@ -424,6 +472,38 @@ mod tests {
             parse_duration("9999999999999999999d").err(),
             Some(ParseDurationError::Overflow)
         );
+    }
+
+    #[test]
+    fn local_datetime_uses_offset_at_target_date() {
+        let target = parse_datetime_with("2026-11-01 10:00", UNIX_EPOCH, |dt| {
+            if dt.month.0 >= 11 { Ok(3600) } else { Ok(7200) }
+        })
+        .unwrap();
+
+        assert_eq!(target, UNIX_EPOCH + Duration::from_secs(1793523600));
+    }
+
+    #[test]
+    fn tomorrow_uses_offset_at_target_date() {
+        let now = UNIX_EPOCH + Duration::from_secs(1793482200); // 2026-10-31 21:30 UTC
+        let target = parse_datetime_with("tomorrow 10:00", now, |dt| {
+            if dt.month.0 >= 11 { Ok(3600) } else { Ok(7200) }
+        })
+        .unwrap();
+
+        assert_eq!(target, UNIX_EPOCH + Duration::from_secs(1793523600));
+    }
+
+    #[test]
+    fn time_only_uses_offset_at_target_date() {
+        let now = UNIX_EPOCH + Duration::from_secs(1793482200); // 2026-10-31 21:30 UTC
+        let target = parse_datetime_with("10:00", now, |dt| {
+            if dt.month.0 >= 11 { Ok(3600) } else { Ok(7200) }
+        })
+        .unwrap();
+
+        assert_eq!(target, UNIX_EPOCH + Duration::from_secs(1793523600));
     }
 
     #[test]

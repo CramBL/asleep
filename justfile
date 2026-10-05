@@ -24,7 +24,7 @@ CONTAINER_RUNNER := env("CONTAINER_RUNNER", "podman")
 ci: format-check lint build test typos shell-test test-all-containers
 
 shell-test:
-    {{ if os() == "windows" { "powershell -File ./tests/shell_test.ps1 ./target/debug/asleep.exe" } else { "./tests/shell_test.sh ./target/debug/asleep" } }}
+    {{ if os() == "windows" { "powershell -File ./tests/shell_test.ps1 ./target/debug/asleep.exe" } else { "./tests/shell_test.sh" } }}
 
 test-all-containers: test-debian test-alpine
 
