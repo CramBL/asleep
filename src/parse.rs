@@ -158,12 +158,16 @@ where
     }
 
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
-        let year = parse_u64(&s[0..4]).ok_or(ParseDateTimeError::InvalidFormat)? as i32;
-        let month = parse_u64(&s[5..7]).ok_or(ParseDateTimeError::InvalidFormat)? as u8;
-        let day = parse_u64(&s[8..10]).ok_or(ParseDateTimeError::InvalidFormat)? as u8;
+        let year = parse_u64(s.get(0..4).ok_or(ParseDateTimeError::InvalidFormat)?)
+            .ok_or(ParseDateTimeError::InvalidFormat)? as i32;
+        let month = parse_u64(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)
+            .ok_or(ParseDateTimeError::InvalidFormat)? as u8;
+        let day = parse_u64(s.get(8..10).ok_or(ParseDateTimeError::InvalidFormat)?)
+            .ok_or(ParseDateTimeError::InvalidFormat)? as u8;
 
         let (h, min, sec, target_offset) = if s.len() > 11 {
-            parse_time(&s[11..])?
+            let time_part = s.get(11..).ok_or(ParseDateTimeError::InvalidFormat)?;
+            parse_time(time_part)?
         } else {
             (Hour24(0), Minute(0), Second(0), None)
         };
@@ -511,6 +515,14 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1000);
         let target = parse_datetime("@2000", now).unwrap();
         assert_eq!(target.duration_since(UNIX_EPOCH).unwrap().as_secs(), 2000);
+    }
+
+    #[test]
+    fn test_parse_datetime_rejects_multibyte_suffix() {
+        assert_eq!(
+            parse_datetime_with("2099-01-01é", UNIX_EPOCH, |_| Ok(0)),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
     }
 
     #[test]
