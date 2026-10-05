@@ -399,20 +399,23 @@ fn parse_offset(s: &str) -> Option<i32> {
     };
     let s = &s[1..];
     let (h, m) = if let Some(pos) = s.find(':') {
-        let h = parse_u64(&s[..pos])? as i32;
-        let m = parse_u64(&s[pos + 1..])? as i32;
+        let h = parse_u8(&s[..pos]).ok()?;
+        let m = parse_u8(&s[pos + 1..]).ok()?;
         (h, m)
     } else if s.len() == 4 {
-        let h = parse_u64(&s[..2])? as i32;
-        let m = parse_u64(&s[2..])? as i32;
+        let h = parse_u8(&s[..2]).ok()?;
+        let m = parse_u8(&s[2..]).ok()?;
         (h, m)
     } else if s.len() == 2 {
-        let h = parse_u64(s)? as i32;
+        let h = parse_u8(s).ok()?;
         (h, 0)
     } else {
         return None;
     };
-    Some(sign * (h * 3600 + m * 60))
+
+    let h = Hour24::new(h)?.0;
+    let m = Minute::new(m)?.0;
+    Some(sign * (i32::from(h) * 3600 + i32::from(m) * 60))
 }
 
 #[cfg(test)]
@@ -583,6 +586,14 @@ mod tests {
 
         let (_, _, _, offset) = parse_time("12:00+0530").unwrap();
         assert_eq!(offset, Some(19800));
+    }
+
+    #[test]
+    fn test_parse_datetime_rejects_invalid_timezone_offsets() {
+        assert!(parse_datetime("2099-01-01 12:00+24:00", UNIX_EPOCH).is_err());
+        assert!(parse_datetime("2099-01-01 12:00+23:60", UNIX_EPOCH).is_err());
+        assert!(parse_datetime("2099-01-01 12:00+99:99", UNIX_EPOCH).is_err());
+        assert!(parse_datetime("2099-01-01 12:00+99999999999999999999:00", UNIX_EPOCH).is_err());
     }
 
     #[test]
