@@ -37,6 +37,7 @@ pub enum ParseDateTimeError {
     InvalidFormat,
     InvalidValue,
     PastTime,
+    Overflow,
 }
 
 impl ParseDateTimeError {
@@ -45,6 +46,7 @@ impl ParseDateTimeError {
             Self::InvalidFormat => "Invalid datetime format",
             Self::InvalidValue => "Invalid date/time value",
             Self::PastTime => "Specified time is in the past",
+            Self::Overflow => "Datetime is out of range",
         }
     }
 }
@@ -188,7 +190,9 @@ where
         };
 
         let ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
-        let target = UNIX_EPOCH + Duration::from_secs(ts_utc);
+        let target = UNIX_EPOCH
+            .checked_add(Duration::from_secs(ts_utc))
+            .ok_or(ParseDateTimeError::Overflow)?;
         if target <= now {
             return Err(ParseDateTimeError::PastTime);
         }
@@ -208,11 +212,15 @@ where
         };
 
         let mut ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
-        let mut target = UNIX_EPOCH + Duration::from_secs(ts_utc);
+        let mut target = UNIX_EPOCH
+            .checked_add(Duration::from_secs(ts_utc))
+            .ok_or(ParseDateTimeError::Overflow)?;
         if target <= now {
             target_dt = next_calendar_day(target_dt)?;
             ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
-            target = UNIX_EPOCH + Duration::from_secs(ts_utc);
+            target = UNIX_EPOCH
+                .checked_add(Duration::from_secs(ts_utc))
+                .ok_or(ParseDateTimeError::Overflow)?;
         }
         return Ok(target);
     }
@@ -241,7 +249,9 @@ where
         ..tomorrow
     };
     let target_as_utc = target_to_utc(target_dt, target_offset, utc_offset_at)?;
-    Ok(UNIX_EPOCH + Duration::from_secs(target_as_utc))
+    UNIX_EPOCH
+        .checked_add(Duration::from_secs(target_as_utc))
+        .ok_or(ParseDateTimeError::Overflow)
 }
 
 fn local_datetime_at<F>(
@@ -283,7 +293,9 @@ fn next_calendar_day(dt: DateTime) -> Result<DateTime, ParseDateTimeError> {
 
 fn parse_unix_timestamp(now: SystemTime, ts_str: &str) -> Result<SystemTime, ParseDateTimeError> {
     let ts = parse_u64(ts_str).ok_or(ParseDateTimeError::InvalidFormat)?;
-    let target = UNIX_EPOCH + Duration::from_secs(ts);
+    let target = UNIX_EPOCH
+        .checked_add(Duration::from_secs(ts))
+        .ok_or(ParseDateTimeError::Overflow)?;
     if target <= now {
         return Err(ParseDateTimeError::PastTime);
     }
@@ -521,6 +533,14 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1000);
         let target = parse_datetime("@2000", now).unwrap();
         assert_eq!(target.duration_since(UNIX_EPOCH).unwrap().as_secs(), 2000);
+    }
+
+    #[test]
+    fn test_parse_datetime_timestamp_overflow_returns_error() {
+        let result =
+            std::panic::catch_unwind(|| parse_datetime("@18446744073709551615", UNIX_EPOCH));
+
+        assert!(matches!(result, Ok(Err(ParseDateTimeError::Overflow))));
     }
 
     #[test]

@@ -83,7 +83,11 @@ pub fn parse() -> Config {
         let mut total = Duration::ZERO;
         for s in duration_strs {
             match parse_duration(&s) {
-                Ok(d) => total += d,
+                Ok(d) => {
+                    total = total
+                        .checked_add(d)
+                        .unwrap_or_else(|| die_parse(b"duration", &s, "Duration overflow"));
+                }
                 Err(e) => die_parse(b"duration", &s, e.as_str()),
             }
         }
