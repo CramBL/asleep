@@ -111,9 +111,10 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use super::*;
+    use windows_sys::Win32::Foundation::SYSTEMTIME;
     use windows_sys::Win32::System::Time::{
         DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation, GetTimeZoneInformation,
-        SYSTEMTIME, TIME_ZONE_ID_INVALID, TzSpecificLocalTimeToSystemTimeEx,
+        TIME_ZONE_ID_INVALID, TzSpecificLocalTimeToSystemTimeEx,
     };
 
     pub fn utc_offset_seconds() -> i32 {
