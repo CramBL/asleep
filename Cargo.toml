@@ -26,7 +26,7 @@ hexf-parse = "0.2.1"
 libc = "0.2.186"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Time", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Time", "Win32_System_Console", "Win32_System_SystemInformation"] }
 
 
 [dev-dependencies]
