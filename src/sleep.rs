@@ -4,7 +4,9 @@ use crate::duration::Seconds;
 use crate::signal;
 use std::io::{self, IsTerminal, Write};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+#[cfg(not(windows))]
+use std::time::Instant;
+use std::time::{Duration, SystemTime};
 
 pub fn run_sleep(config: Config) -> i32 {
     let Config {
@@ -13,7 +15,7 @@ pub fn run_sleep(config: Config) -> i32 {
         show_progress,
         suspend_aware,
     } = config;
-    let deadline = match build_deadline(target, suspend_aware, Instant::now()) {
+    let deadline = match build_deadline(target, suspend_aware) {
         Some(deadline) => deadline,
         None => return deadline_overflow(),
     };
@@ -51,7 +53,7 @@ pub fn run_sleep(config: Config) -> i32 {
                 .checked_duration_since(SuspendAwareInstant::now())
                 .unwrap_or(Duration::ZERO),
             Deadline::Monotonic(deadline) => deadline
-                .checked_duration_since(Instant::now())
+                .checked_duration_since(MonotonicInstant::now())
                 .unwrap_or(Duration::ZERO),
             Deadline::Infinite => unreachable!(),
         };
@@ -74,19 +76,15 @@ pub fn run_sleep(config: Config) -> i32 {
     exit_code
 }
 
-fn build_deadline(
-    target: SleepTarget,
-    suspend_aware: bool,
-    monotonic_now: Instant,
-) -> Option<Deadline> {
+fn build_deadline(target: SleepTarget, suspend_aware: bool) -> Option<Deadline> {
     match target {
         SleepTarget::Deadline(deadline) => Some(Deadline::Wall(deadline)),
         SleepTarget::Duration(duration) if suspend_aware => SuspendAwareInstant::now()
             .checked_add(duration)
             .map(Deadline::SuspendAware),
-        SleepTarget::Duration(duration) => {
-            monotonic_now.checked_add(duration).map(Deadline::Monotonic)
-        }
+        SleepTarget::Duration(duration) => MonotonicInstant::now()
+            .checked_add(duration)
+            .map(Deadline::Monotonic),
         SleepTarget::Infinite => Some(Deadline::Infinite),
     }
 }
@@ -186,11 +184,61 @@ fn suspend_aware_now() -> Duration {
     ORIGIN.get_or_init(Instant::now).elapsed()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct MonotonicInstant(MonotonicInstantInner);
+
+#[cfg(windows)]
+type MonotonicInstantInner = Duration;
+
+#[cfg(not(windows))]
+type MonotonicInstantInner = Instant;
+
+impl MonotonicInstant {
+    fn now() -> Self {
+        Self(monotonic_now())
+    }
+
+    fn checked_add(self, duration: Duration) -> Option<Self> {
+        self.0.checked_add(duration).map(Self)
+    }
+
+    fn checked_duration_since(self, earlier: Self) -> Option<Duration> {
+        #[cfg(windows)]
+        {
+            self.0.checked_sub(earlier.0)
+        }
+        #[cfg(not(windows))]
+        {
+            self.0.checked_duration_since(earlier.0)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn monotonic_now() -> Duration {
+    use windows_sys::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTimePrecise;
+
+    let mut interrupt_time = 0;
+    // SAFETY: `interrupt_time` is a valid writable u64.
+    // QueryUnbiasedInterruptTimePrecise cannot fail and reports active-system
+    // interrupt time in 100 ns units, excluding sleep and hibernation.
+    unsafe { QueryUnbiasedInterruptTimePrecise(&mut interrupt_time) };
+
+    let seconds = interrupt_time / 10_000_000;
+    let nanos = ((interrupt_time % 10_000_000) * 100) as u32;
+    Duration::new(seconds, nanos)
+}
+
+#[cfg(not(windows))]
+fn monotonic_now() -> Instant {
+    Instant::now()
+}
+
 #[derive(Debug, PartialEq)]
 enum Deadline {
     Wall(SystemTime),
     SuspendAware(SuspendAwareInstant),
-    Monotonic(Instant),
+    Monotonic(MonotonicInstant),
     Infinite,
 }
 
@@ -217,19 +265,22 @@ mod tests {
         let parsed_at = std::time::UNIX_EPOCH + Duration::from_secs(100);
         let target = parsed_at + Duration::from_secs(10);
         assert_eq!(
-            build_deadline(SleepTarget::Deadline(target), true, Instant::now()),
+            build_deadline(SleepTarget::Deadline(target), true),
             Some(Deadline::Wall(target)),
         );
     }
 
     #[test]
     fn relative_suspend_aware_duration_uses_monotonic_boot_clock() {
-        let deadline = build_deadline(
-            SleepTarget::Duration(Duration::from_secs(10)),
-            true,
-            Instant::now(),
-        );
+        let deadline = build_deadline(SleepTarget::Duration(Duration::from_secs(10)), true);
 
         assert!(matches!(deadline, Some(Deadline::SuspendAware(_))));
+    }
+
+    #[test]
+    fn relative_monotonic_duration_uses_suspend_excluding_clock() {
+        let deadline = build_deadline(SleepTarget::Duration(Duration::from_secs(10)), false);
+
+        assert!(matches!(deadline, Some(Deadline::Monotonic(_))));
     }
 }
