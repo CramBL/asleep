@@ -138,7 +138,10 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[rstest]
 #[case::zero(&["0"])]
 #[case::fractional(&["0.001"])]
+#[case::leading_decimal_point(&[".001"])]
+#[case::trailing_decimal_point(&["0."])]
 #[case::scientific(&["1e-3"])]
+#[case::uppercase_exponent(&["1E-3"])]
 #[case::leading_plus(&["+0.001"])]
 #[case::leading_whitespace(&[" 0.001"])]
 #[case::multiple_zero_units(&["0d", "0h", "0m", "0s"])]
@@ -158,6 +161,7 @@ fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
 
 #[rstest]
 #[case::multiple_units(&["1d", "2h", "3m", "4s"])]
+#[case::explicit_positive_exponent(&["1e+0"])]
 #[case::inf(&["inf"])]
 #[case::infinity(&["infinity"])]
 #[case::uppercase_inf(&["INF"])]
