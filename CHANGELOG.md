@@ -5,27 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-
 - Reject internal whitespace within a single duration operand, matching GNU `sleep`.
-
 - Reject whitespace between a leading `+` and a duration operand, matching GNU `sleep`.
-
 - Accept GNU sleep-compatible hexadecimal exponents beyond the native integer range.
-
 - Accept GNU-style unambiguous abbreviations of the standard `--help` and `--version` options.
-
 - Accept a leading `+` on GNU sleep-compatible infinite duration operands.
-
 - Treat a lone `--` as a zero-duration sleep, matching GNU `sleep`.
-
 - Match GNU `sleep` operand whitespace handling by accepting leading whitespace and rejecting trailing whitespace.
-
 - Accept the GNU-style `--` end-of-options marker before duration operands.
-
 - Saturate GNU sleep-compatible oversized finite durations instead of rejecting them.
-
 - Match GNU `sleep` by requiring lowercase unit suffixes on infinite durations.
-
 - Accept duration decimals in either the current numeric locale or the C locale, matching GNU sleep.
 - Accept GNU sleep-compatible hexadecimal floating-point durations.
 - Reject uppercase duration suffixes to match GNU sleep.

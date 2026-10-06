@@ -165,6 +165,8 @@ fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::positive_inf(&["+inf"])]
 #[case::positive_infinity(&["+infinity"])]
 #[case::positive_inf_with_suffix(&["+INFd"])]
+#[case::infinity_with_suffix(&["infinityd"])]
+#[case::mixed_case_infinity_with_suffix(&["InFiNiTys"])]
 #[case::huge_scientific(&["1e400"])]
 #[case::beyond_u64_seconds(&["18446744073709551616"])]
 #[case::huge_unit_scaled_integer(&["9999999999999999999d"])]
