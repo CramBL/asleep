@@ -1,4 +1,4 @@
-use crate::args::Config;
+use crate::args::{Config, SleepTarget};
 use crate::display::{TerminalGuard, update_progress_seconds};
 use crate::duration::Seconds;
 use crate::signal;
@@ -8,21 +8,14 @@ use std::time::{Duration, Instant, SystemTime};
 
 pub fn run_sleep(config: Config) -> i32 {
     let Config {
-        duration,
+        target,
         poll_interval,
         show_progress,
         suspend_aware,
     } = config;
-    let deadline = if suspend_aware {
-        match SystemTime::now().checked_add(duration) {
-            Some(deadline) => Deadline::Wall(deadline),
-            None => return deadline_overflow(),
-        }
-    } else {
-        match Instant::now().checked_add(duration) {
-            Some(deadline) => Deadline::Monotonic(deadline),
-            None => return deadline_overflow(),
-        }
+    let deadline = match build_deadline(target, suspend_aware, SystemTime::now(), Instant::now()) {
+        Some(deadline) => deadline,
+        None => return deadline_overflow(),
     };
 
     let is_tty = std::io::stdout().is_terminal();
@@ -72,6 +65,23 @@ pub fn run_sleep(config: Config) -> i32 {
     exit_code
 }
 
+fn build_deadline(
+    target: SleepTarget,
+    suspend_aware: bool,
+    wall_now: SystemTime,
+    monotonic_now: Instant,
+) -> Option<Deadline> {
+    match target {
+        SleepTarget::Deadline(deadline) => Some(Deadline::Wall(deadline)),
+        SleepTarget::Duration(duration) if suspend_aware => {
+            wall_now.checked_add(duration).map(Deadline::Wall)
+        }
+        SleepTarget::Duration(duration) => {
+            monotonic_now.checked_add(duration).map(Deadline::Monotonic)
+        }
+    }
+}
+
 fn display_seconds(remaining: Duration) -> Seconds {
     Seconds(
         remaining
@@ -80,6 +90,7 @@ fn display_seconds(remaining: Duration) -> Seconds {
     )
 }
 
+#[derive(Debug, PartialEq)]
 enum Deadline {
     Wall(SystemTime),
     Monotonic(Instant),
@@ -101,5 +112,22 @@ mod tests {
         assert_eq!(display_seconds(Duration::from_secs(5)).0, 5);
         assert_eq!(display_seconds(Duration::from_millis(4999)).0, 5);
         assert_eq!(display_seconds(Duration::from_millis(1)).0, 1);
+    }
+
+    #[test]
+    fn absolute_deadline_is_not_rebased_when_sleep_starts() {
+        let parsed_at = std::time::UNIX_EPOCH + Duration::from_secs(100);
+        let target = parsed_at + Duration::from_secs(10);
+        let sleep_started_at = parsed_at + Duration::from_secs(1);
+
+        assert_eq!(
+            build_deadline(
+                SleepTarget::Deadline(target),
+                true,
+                sleep_started_at,
+                Instant::now(),
+            ),
+            Some(Deadline::Wall(target)),
+        );
     }
 }

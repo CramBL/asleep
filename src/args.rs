@@ -5,10 +5,15 @@ use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
 
 pub struct Config {
-    pub duration: Duration,
+    pub target: SleepTarget,
     pub poll_interval: PollInterval,
     pub show_progress: bool,
     pub suspend_aware: bool,
+}
+
+pub enum SleepTarget {
+    Duration(Duration),
+    Deadline(SystemTime),
 }
 
 pub fn parse() -> Config {
@@ -75,10 +80,10 @@ pub fn parse() -> Config {
         die(b"Cannot provide both duration and --until");
     }
 
-    let duration = if let Some(s) = until_val {
+    let target = if let Some(s) = until_val {
         let now = SystemTime::now();
         match parse_datetime(&s, now) {
-            Ok(target) => target.duration_since(now).unwrap_or(Duration::ZERO),
+            Ok(target) => SleepTarget::Deadline(target),
             Err(e) => die_parse(b"datetime", &s, e.as_str()),
         }
     } else if !duration_strs.is_empty() {
@@ -93,13 +98,13 @@ pub fn parse() -> Config {
                 Err(e) => die_parse(b"duration", &s, e.as_str()),
             }
         }
-        total
+        SleepTarget::Duration(total)
     } else {
         die_with_usage(b"No duration or --until provided");
     };
 
     Config {
-        duration,
+        target,
         poll_interval,
         show_progress,
         suspend_aware,
