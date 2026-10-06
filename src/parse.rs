@@ -56,6 +56,12 @@ impl FromStr for SleepDuration {
             return Err(ParseDurationError::InvalidInput);
         }
 
+        if input.starts_with('-') {
+            return input
+                .parse::<NegativeZeroDuration>()
+                .map(|_| Self::Finite(Duration::ZERO));
+        }
+
         let input = input.strip_prefix('+').unwrap_or(input);
 
         if input.parse::<InfiniteDuration>().is_ok() {
@@ -80,6 +86,56 @@ impl SleepDuration {
                 .unwrap_or(Self::Saturated),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NegativeZeroDuration;
+
+impl FromStr for NegativeZeroDuration {
+    type Err = ParseDurationError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input
+            .strip_prefix('-')
+            .ok_or(ParseDurationError::InvalidInput)?;
+        let normalized = crate::numeric_locale::normalize(input);
+        let input = normalized.as_ref();
+
+        let number = if input.parse::<DurationNumber>().is_ok() {
+            input
+        } else {
+            let (index, suffix) = input
+                .char_indices()
+                .next_back()
+                .ok_or(ParseDurationError::InvalidInput)?;
+            DurationUnit::from_suffix(suffix).ok_or(ParseDurationError::InvalidInput)?;
+            &input[..index]
+        };
+
+        number.parse::<DurationNumber>()?;
+        if is_exact_zero(number) {
+            Ok(Self)
+        } else {
+            Err(ParseDurationError::InvalidInput)
+        }
+    }
+}
+
+fn is_exact_zero(number: &str) -> bool {
+    let significand = if let Some(hex) = number
+        .strip_prefix("0x")
+        .or_else(|| number.strip_prefix("0X"))
+    {
+        hex.split(['p', 'P']).next().unwrap_or(hex)
+    } else {
+        number.split(['e', 'E']).next().unwrap_or(number)
+    };
+
+    let mut digits = significand.chars().filter(|ch| *ch != '.');
+    let Some(first) = digits.next() else {
+        return false;
+    };
+    first == '0' && digits.all(|ch| ch == '0')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -813,6 +869,27 @@ mod tests {
             input.parse::<SleepDuration>().unwrap(),
             SleepDuration::Infinite
         );
+    }
+
+    #[rstest]
+    #[case::integer("-0")]
+    #[case::suffix("-0s")]
+    #[case::fraction("-0.0")]
+    #[case::scientific("-0e999")]
+    #[case::hex("-0x0p0")]
+    fn test_negative_zero_duration_forms(#[case] input: &str) {
+        assert_eq!(
+            input.parse::<SleepDuration>().unwrap(),
+            SleepDuration::Finite(Duration::ZERO)
+        );
+    }
+
+    #[rstest]
+    #[case::nonzero("-1")]
+    #[case::decimal_underflow("-1e-9999")]
+    #[case::hex_underflow("-0x1p-99999")]
+    fn test_negative_nonzero_duration_forms_are_rejected(#[case] input: &str) {
+        assert!(input.parse::<SleepDuration>().is_err());
     }
 
     #[test]

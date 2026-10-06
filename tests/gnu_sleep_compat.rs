@@ -124,6 +124,8 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::empty(&[""])]
 #[case::missing_operand(&[])]
 #[case::trailing_whitespace(&["0.001 "])]
+#[case::negative_decimal_underflow(&["--", "-1e-9999"])]
+#[case::negative_hex_underflow(&["--", "-0x1p-99999"])]
 fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Failure, Duration::from_millis(250));
 }
@@ -137,6 +139,10 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::multiple_zero_units(&["0d", "0h", "0m", "0s"])]
 #[case::end_of_options(&["--", "0"])]
 #[case::bare_end_of_options(&["--"])]
+#[case::negative_zero(&["--", "-0"])]
+#[case::negative_zero_with_suffix(&["--", "-0s"])]
+#[case::negative_zero_fraction(&["--", "-0.0"])]
+#[case::negative_zero_hex(&["--", "-0x0p0"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }
