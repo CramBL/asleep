@@ -123,87 +123,163 @@ fn parse_u8(s: &str) -> Result<u8, ParseDateTimeError> {
     u8::try_from(value).map_err(|_| ParseDateTimeError::InvalidValue)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DurationNumber {
+    Integer(u64),
+    Float(f64),
+}
+
+impl std::str::FromStr for DurationNumber {
+    type Err = ParseDurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty()
+            || s.starts_with('+')
+            || s.starts_with('-')
+            || !matches!(s.chars().next(), Some('0'..='9' | '.'))
+        {
+            return Err(ParseDurationError::InvalidInput);
+        }
+
+        if s.contains('.') || s.contains('e') || s.contains('E') {
+            s.parse::<f64>()
+                .map(Self::Float)
+                .map_err(|_| ParseDurationError::InvalidNumber)
+        } else {
+            s.parse::<u64>()
+                .map(Self::Integer)
+                .map_err(|_| ParseDurationError::InvalidNumber)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DurationUnit {
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+}
+
+impl DurationUnit {
+    fn from_suffix(suffix: char) -> Option<Self> {
+        match suffix.to_ascii_lowercase() {
+            's' => Some(Self::Seconds),
+            'm' => Some(Self::Minutes),
+            'h' => Some(Self::Hours),
+            'd' => Some(Self::Days),
+            _ => None,
+        }
+    }
+
+    fn multiplier(self) -> u64 {
+        match self {
+            Self::Seconds => 1,
+            Self::Minutes => 60,
+            Self::Hours => 3600,
+            Self::Days => 86400,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DurationPart(Duration);
+
+impl std::str::FromStr for DurationPart {
+    type Err = ParseDurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(ParseDurationError::InvalidInput);
+        }
+
+        let (number, unit) = match s.char_indices().next_back() {
+            Some((index, suffix)) => {
+                if let Some(unit) = DurationUnit::from_suffix(suffix) {
+                    (&s[..index], unit)
+                } else {
+                    match s.parse::<DurationNumber>() {
+                        Ok(number) => return Self::from_number(number, DurationUnit::Seconds),
+                        Err(error) => {
+                            if !matches!(suffix, 'e' | 'E')
+                                && s[..index].parse::<DurationNumber>().is_ok()
+                            {
+                                return Err(ParseDurationError::InvalidUnit);
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+            None => return Err(ParseDurationError::InvalidInput),
+        };
+
+        let number = number.parse::<DurationNumber>()?;
+        Self::from_number(number, unit)
+    }
+}
+
+impl DurationPart {
+    fn from_number(number: DurationNumber, unit: DurationUnit) -> Result<Self, ParseDurationError> {
+        let multiplier = unit.multiplier();
+        let duration = match number {
+            DurationNumber::Integer(value) => {
+                let seconds = value
+                    .checked_mul(multiplier)
+                    .ok_or(ParseDurationError::Overflow)?;
+                Duration::from_secs(seconds)
+            }
+            DurationNumber::Float(value) => {
+                let seconds = value * multiplier as f64;
+                Duration::try_from_secs_f64(seconds).map_err(|_| ParseDurationError::Overflow)?
+            }
+        };
+
+        Ok(Self(duration))
+    }
+}
+
+fn parse_duration_chunk(chunk: &str) -> Result<Duration, ParseDurationError> {
+    let mut total = Duration::ZERO;
+    let mut start = 0;
+
+    for (index, ch) in chunk.char_indices() {
+        if DurationUnit::from_suffix(ch).is_none() {
+            continue;
+        }
+
+        let end = index + ch.len_utf8();
+        let part = chunk[start..end].parse::<DurationPart>()?;
+        total = total
+            .checked_add(part.0)
+            .ok_or(ParseDurationError::Overflow)?;
+        start = end;
+    }
+
+    if start < chunk.len() {
+        let part = chunk[start..].parse::<DurationPart>()?;
+        total = total
+            .checked_add(part.0)
+            .ok_or(ParseDurationError::Overflow)?;
+    } else if start == 0 {
+        return Err(ParseDurationError::InvalidInput);
+    }
+
+    Ok(total)
+}
+
 pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
     let s = s.trim();
     if s.is_empty() {
         return Err(ParseDurationError::EmptyInput);
     }
 
-    let mut total = Duration::ZERO;
-    let mut i = 0;
-    let bytes = s.as_bytes();
-
-    while i < bytes.len() {
-        if bytes[i].is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-
-        let start = i;
-        let mut has_digit = false;
-        while i < bytes.len() && bytes[i].is_ascii_digit() {
-            has_digit = true;
-            i += 1;
-        }
-        if i < bytes.len() && bytes[i] == b'.' {
-            i += 1;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                has_digit = true;
-                i += 1;
-            }
-        }
-        if !has_digit {
-            return Err(ParseDurationError::InvalidInput);
-        }
-        if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
-            i += 1;
-            if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {
-                i += 1;
-            }
-            let exponent_start = i;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
-            }
-            if i == exponent_start {
-                return Err(ParseDurationError::InvalidNumber);
-            }
-        }
-
-        let number = &s[start..i];
-        let multiplier = if i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-            let multiplier = match bytes[i].to_ascii_lowercase() {
-                b's' => 1,
-                b'm' => 60,
-                b'h' => 3600,
-                b'd' => 86400,
-                _ => return Err(ParseDurationError::InvalidUnit),
-            };
-            i += 1;
-            multiplier
-        } else {
-            1
-        };
-
-        let part = if number.bytes().any(|b| matches!(b, b'.' | b'e' | b'E')) {
-            let value = number
-                .parse::<f64>()
-                .map_err(|_| ParseDurationError::InvalidNumber)?;
-            let seconds = value * multiplier as f64;
-            Duration::try_from_secs_f64(seconds).map_err(|_| ParseDurationError::Overflow)?
-        } else {
-            let value = parse_u64(number).ok_or(ParseDurationError::InvalidNumber)?;
-            let seconds = value
-                .checked_mul(multiplier)
-                .ok_or(ParseDurationError::Overflow)?;
-            Duration::from_secs(seconds)
-        };
-
-        total = total
-            .checked_add(part)
-            .ok_or(ParseDurationError::Overflow)?;
-    }
-
-    Ok(total)
+    s.split_ascii_whitespace()
+        .try_fold(Duration::ZERO, |total, chunk| {
+            total
+                .checked_add(parse_duration_chunk(chunk)?)
+                .ok_or(ParseDurationError::Overflow)
+        })
 }
 
 pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateTimeError> {
