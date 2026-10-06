@@ -188,7 +188,7 @@ fn print_usage(writer: &mut impl Write) {
         "  - Append an offset like '+02:00' or '-05:00' for a specific timezone.\n",
         "  - If a time-only deadline has already passed today, tomorrow is assumed.\n\n",
         "Example:\n",
-        "  asleep 1h30m\n",
+        "  asleep 1h 30m\n",
         "  asleep --until 23:59\n",
         "  asleep --until 6pm\n",
         "  asleep --until 11:30am\n",

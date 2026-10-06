@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+
 - Reject compound durations within a single CLI operand, matching GNU `sleep`; pass each duration as a separate operand.
 - Reject internal whitespace within a single duration operand, matching GNU `sleep`.
 - Reject whitespace between a leading `+` and a duration operand, matching GNU `sleep`.

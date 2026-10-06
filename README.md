@@ -29,7 +29,7 @@ An advanced, suspend-aware, and GNU sleep-compatible sleep utility with live cou
 
 ## Usage
 ```bash
-asleep 1h30m
+asleep 1h 30m
 asleep 5m
 asleep 90
 asleep --until tomorrow 8am
