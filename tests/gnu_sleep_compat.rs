@@ -143,6 +143,8 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::negative_zero_with_suffix(&["--", "-0s"])]
 #[case::negative_zero_fraction(&["--", "-0.0"])]
 #[case::negative_zero_hex(&["--", "-0x0p0"])]
+#[case::positive_decimal_underflow(&["1e-9999"])]
+#[case::positive_hex_underflow(&["0x1p-1075"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }

@@ -292,9 +292,28 @@ impl FromStr for HexFloat {
             &normalized
         };
 
-        hexf_parse::parse_hexf64(input, false)
-            .map(Self)
-            .map_err(|_| ParseDurationError::InvalidNumber)
+        match hexf_parse::parse_hexf64(input, false) {
+            Ok(value) => Ok(Self(value)),
+            Err(_) => {
+                let (significand, exponent) = input
+                    .rsplit_once(['p', 'P'])
+                    .ok_or(ParseDurationError::InvalidNumber)?;
+                let exponent = exponent
+                    .parse::<i32>()
+                    .map_err(|_| ParseDurationError::InvalidNumber)?;
+                if exponent >= -1074 {
+                    return Err(ParseDurationError::InvalidNumber);
+                }
+
+                let scaled_exponent = exponent
+                    .checked_add(1074)
+                    .ok_or(ParseDurationError::InvalidNumber)?;
+                let scaled =
+                    hexf_parse::parse_hexf64(&format!("{significand}p{scaled_exponent}"), false)
+                        .map_err(|_| ParseDurationError::InvalidNumber)?;
+                Ok(Self(scaled * f64::from_bits(1)))
+            }
+        }
     }
 }
 
@@ -833,6 +852,11 @@ mod tests {
     #[case::hex_with_binary_exponent("0x1p-1s", Duration::from_millis(500))]
     fn test_gnu_hexadecimal_numeric_formats(#[case] input: &str, #[case] expected: Duration) {
         assert_eq!(parse_duration(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_gnu_hexadecimal_positive_underflow() {
+        assert_eq!(parse_duration("0x1p-1075").unwrap(), Duration::ZERO);
     }
 
     #[test]
