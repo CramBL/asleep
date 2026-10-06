@@ -131,6 +131,8 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::internal_space(&["0 0"])]
 #[case::internal_tab(&["0\t0"])]
 #[case::spaced_compound_duration(&["1h 30m"])]
+#[case::concatenated_compound_duration(&["1h30m"])]
+#[case::repeated_suffix(&["0s0s"])]
 fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Failure, Duration::from_millis(250));
 }

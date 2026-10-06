@@ -75,7 +75,7 @@ impl FromStr for SleepDuration {
             return Ok(Self::Infinite);
         }
 
-        match parse_duration_value(input)? {
+        match input.parse::<DurationPart>()?.0 {
             DurationValue::Finite(duration) => Ok(Self::Finite(duration)),
             DurationValue::Saturated => Ok(Self::Saturated),
         }
@@ -983,8 +983,10 @@ mod tests {
     #[rstest]
     #[case::space("0 0")]
     #[case::tab("0\t0")]
-    #[case::compound("1h 30m")]
-    fn test_cli_duration_rejects_internal_whitespace(#[case] input: &str) {
+    #[case::spaced_compound("1h 30m")]
+    #[case::concatenated_compound("1h30m")]
+    #[case::repeated_suffix("0s0s")]
+    fn test_cli_duration_rejects_compound_operands(#[case] input: &str) {
         assert!(input.parse::<SleepDuration>().is_err());
     }
 
