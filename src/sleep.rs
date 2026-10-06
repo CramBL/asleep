@@ -59,7 +59,7 @@ pub fn run_sleep(config: Config) -> i32 {
         }
 
         if show_progress && is_tty {
-            update_progress_seconds(Seconds(remaining.as_secs()));
+            update_progress_seconds(display_seconds(remaining));
         }
 
         let sleep_time = remaining.min(poll_duration);
@@ -72,6 +72,14 @@ pub fn run_sleep(config: Config) -> i32 {
     exit_code
 }
 
+fn display_seconds(remaining: Duration) -> Seconds {
+    Seconds(
+        remaining
+            .as_secs()
+            .saturating_add(u64::from(remaining.subsec_nanos() != 0)),
+    )
+}
+
 enum Deadline {
     Wall(SystemTime),
     Monotonic(Instant),
@@ -81,4 +89,17 @@ fn deadline_overflow() -> i32 {
     let mut stderr = io::stderr().lock();
     let _ = stderr.write_all(b"Error: Sleep duration is out of range\n");
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_seconds_rounds_up_fractional_seconds() {
+        assert_eq!(display_seconds(Duration::ZERO).0, 0);
+        assert_eq!(display_seconds(Duration::from_secs(5)).0, 5);
+        assert_eq!(display_seconds(Duration::from_millis(4999)).0, 5);
+        assert_eq!(display_seconds(Duration::from_millis(1)).0, 1);
+    }
 }
