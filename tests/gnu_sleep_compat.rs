@@ -122,6 +122,7 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::extra_suffix_text(&["42d", "42day"])]
 #[case::nan(&["nan"])]
 #[case::empty(&[""])]
+#[case::trailing_whitespace(&["0.001 "])]
 fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Failure, Duration::from_millis(250));
 }
@@ -131,6 +132,7 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::fractional(&["0.001"])]
 #[case::scientific(&["1e-3"])]
 #[case::leading_plus(&["+0.001"])]
+#[case::leading_whitespace(&[" 0.001"])]
 #[case::multiple_zero_units(&["0d", "0h", "0m", "0s"])]
 #[case::end_of_options(&["--", "0"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {

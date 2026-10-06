@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Match GNU `sleep` operand whitespace handling by accepting leading whitespace and rejecting trailing whitespace.
+
 - Accept the GNU-style `--` end-of-options marker before duration operands.
 
 - Saturate GNU sleep-compatible oversized finite durations instead of rejecting them.

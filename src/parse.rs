@@ -44,9 +44,16 @@ impl FromStr for SleepDuration {
     type Err = ParseDurationError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let input = input.trim();
+        let input = input.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
         if input.is_empty() {
             return Err(ParseDurationError::EmptyInput);
+        }
+        if input
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch.is_ascii_whitespace())
+        {
+            return Err(ParseDurationError::InvalidInput);
         }
 
         if input.parse::<InfiniteDuration>().is_ok() {
