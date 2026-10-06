@@ -1,5 +1,6 @@
 use crate::datetime::{
-    DateTime, Day, Hour24, Minute, Month, Second, Year, from_unix_timestamp, to_unix_timestamp,
+    DateTime, Day, Hour24, Minute, Month, Second, UtcOffset, Year, from_unix_timestamp,
+    to_unix_timestamp,
 };
 use crate::utc_offset::utc_offset_seconds_at;
 use std::str::FromStr;
@@ -100,6 +101,37 @@ impl ParseDateTimeError {
 impl std::fmt::Display for ParseDateTimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for UtcOffset {
+    type Err = ParseDateTimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let (sign, value) = if let Some(value) = s.strip_prefix('+') {
+            (1, value)
+        } else if let Some(value) = s.strip_prefix('-') {
+            (-1, value)
+        } else {
+            return Err(ParseDateTimeError::InvalidFormat);
+        };
+
+        let (hours, minutes) = match value.split_once(':') {
+            Some((hours, minutes)) => (parse_u8(hours)?, parse_u8(minutes)?),
+            None if value.len() == 4 => {
+                let (hours, minutes) = value.split_at(2);
+                (parse_u8(hours)?, parse_u8(minutes)?)
+            }
+            None if value.len() == 2 => (parse_u8(value)?, 0),
+            None => return Err(ParseDateTimeError::InvalidFormat),
+        };
+
+        let hours = Hour24::new(hours).ok_or(ParseDateTimeError::InvalidValue)?;
+        let minutes = Minute::new(minutes).ok_or(ParseDateTimeError::InvalidValue)?;
+        Ok(UtcOffset::from_seconds(
+            sign * (i32::from(hours.0) * 3600 + i32::from(minutes.0) * 60),
+        ))
     }
 }
 
@@ -421,17 +453,18 @@ where
 {
     let utc_dt = from_unix_timestamp(now_ts_utc);
     let initial_offset = utc_offset_at(utc_dt)?;
-    let initial_local = datetime_at_offset(now_ts_utc, initial_offset)?;
+    let initial_local = datetime_at_offset(now_ts_utc, UtcOffset::from_seconds(initial_offset))?;
     let resolved_offset = utc_offset_at(initial_local)?;
 
     if resolved_offset == initial_offset {
         Ok(initial_local)
     } else {
-        datetime_at_offset(now_ts_utc, resolved_offset)
+        datetime_at_offset(now_ts_utc, UtcOffset::from_seconds(resolved_offset))
     }
 }
 
-fn datetime_at_offset(ts_utc: u64, offset: i32) -> Result<DateTime, ParseDateTimeError> {
+fn datetime_at_offset(ts_utc: u64, offset: UtcOffset) -> Result<DateTime, ParseDateTimeError> {
+    let offset = offset.seconds();
     let shifted = if offset >= 0 {
         ts_utc.checked_add(offset as u64)
     } else {
@@ -462,7 +495,7 @@ fn parse_unix_timestamp(now: SystemTime, ts_str: &str) -> Result<SystemTime, Par
 
 fn target_to_utc<F>(
     dt: DateTime,
-    target_offset: Option<i32>,
+    target_offset: Option<UtcOffset>,
     utc_offset_at: &mut F,
 ) -> Result<u64, ParseDateTimeError>
 where
@@ -470,7 +503,7 @@ where
 {
     let ts_target = to_unix_timestamp(dt);
     let used_offset = match target_offset {
-        Some(offset) => offset,
+        Some(offset) => offset.seconds(),
         None => utc_offset_at(dt)?,
     };
 
@@ -485,17 +518,17 @@ where
     }
 }
 
-fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDateTimeError> {
+fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<UtcOffset>), ParseDateTimeError> {
     let s = s.trim();
 
     let (time_part_raw, offset) = if let Some(stripped) = s.strip_suffix('Z') {
-        (stripped, Some(0))
+        (stripped, Some(UtcOffset::from_seconds(0)))
     } else if s.to_ascii_lowercase().ends_with("utc") {
         let len = s.len() - 3;
-        (s[..len].trim(), Some(0))
+        (s[..len].trim(), Some(UtcOffset::from_seconds(0)))
     } else if let Some(pos) = s.find(['+', '-']) {
         let (t, o_str) = s.split_at(pos);
-        let offset = parse_offset(o_str).ok_or(ParseDateTimeError::InvalidFormat)?;
+        let offset = o_str.parse::<UtcOffset>()?;
         (t.trim(), Some(offset))
     } else {
         (s, None)
@@ -555,37 +588,6 @@ fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDat
     let sec = Second::new(s).ok_or(ParseDateTimeError::InvalidValue)?;
 
     Ok((hour, min, sec, offset))
-}
-
-pub(crate) fn parse_offset(s: &str) -> Option<i32> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    let sign = match s.as_bytes()[0] {
-        b'+' => 1,
-        b'-' => -1,
-        _ => return None,
-    };
-    let s = &s[1..];
-    let (h, m) = if let Some(pos) = s.find(':') {
-        let h = parse_u8(&s[..pos]).ok()?;
-        let m = parse_u8(&s[pos + 1..]).ok()?;
-        (h, m)
-    } else if s.len() == 4 {
-        let h = parse_u8(&s[..2]).ok()?;
-        let m = parse_u8(&s[2..]).ok()?;
-        (h, m)
-    } else if s.len() == 2 {
-        let h = parse_u8(s).ok()?;
-        (h, 0)
-    } else {
-        return None;
-    };
-
-    let h = Hour24::new(h)?.0;
-    let m = Minute::new(m)?.0;
-    Some(sign * (i32::from(h) * 3600 + i32::from(m) * 60))
 }
 
 #[cfg(test)]
@@ -784,13 +786,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_utc_offset() {
+        assert_eq!(
+            "+02:30".parse::<UtcOffset>().unwrap(),
+            UtcOffset::from_seconds(2 * 3600 + 30 * 60)
+        );
+        assert_eq!(
+            "-0530".parse::<UtcOffset>().unwrap(),
+            UtcOffset::from_seconds(-(5 * 3600 + 30 * 60))
+        );
+        assert_eq!(
+            "+02".parse::<UtcOffset>().unwrap(),
+            UtcOffset::from_seconds(2 * 3600)
+        );
+    }
+
+    #[test]
+    fn test_parse_utc_offset_rejects_invalid_values() {
+        assert!("02:00".parse::<UtcOffset>().is_err());
+        assert!("+24:00".parse::<UtcOffset>().is_err());
+        assert!("+02:60".parse::<UtcOffset>().is_err());
+        assert!("+020".parse::<UtcOffset>().is_err());
+    }
+
+    #[test]
     fn test_parse_time_utc() {
         let (h, _m, _s, offset) = parse_time("23:59Z").unwrap();
-        assert_eq!(offset, Some(0));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(0)));
         assert_eq!(h, Hour24(23));
 
         let (h, _m, _s, offset) = parse_time("12:00 UTC").unwrap();
-        assert_eq!(offset, Some(0));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(0)));
         assert_eq!(h, Hour24(12));
 
         let (_h, _m, _s, offset) = parse_time("08:00").unwrap();
@@ -800,13 +826,13 @@ mod tests {
     #[test]
     fn test_parse_time_offset() {
         let (_, _, _, offset) = parse_time("12:00+02:00").unwrap();
-        assert_eq!(offset, Some(7200));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(7200)));
 
         let (_, _, _, offset) = parse_time("12:00-05:00").unwrap();
-        assert_eq!(offset, Some(-18000));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(-18000)));
 
         let (_, _, _, offset) = parse_time("12:00+0530").unwrap();
-        assert_eq!(offset, Some(19800));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(19800)));
     }
 
     #[test]
@@ -895,7 +921,7 @@ mod tests {
     #[test]
     fn test_parse_time_am_pm_with_offset() {
         let (_, _, _, offset) = parse_time("1:00pm+02:00").unwrap();
-        assert_eq!(offset, Some(7200));
+        assert_eq!(offset, Some(UtcOffset::from_seconds(7200)));
     }
 
     #[test]

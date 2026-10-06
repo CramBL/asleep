@@ -12,6 +12,9 @@ pub struct Minute(pub u8);
 pub struct Second(pub u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UtcOffset(i32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DateTime {
     pub year: Year,
     pub month: Month,
@@ -68,6 +71,16 @@ impl Minute {
 impl Second {
     pub fn new(s: u8) -> Option<Self> {
         if s < 60 { Some(Second(s)) } else { None }
+    }
+}
+
+impl UtcOffset {
+    pub fn from_seconds(seconds: i32) -> Self {
+        Self(seconds)
+    }
+
+    pub fn seconds(self) -> i32 {
+        self.0
     }
 }
 

@@ -1,5 +1,6 @@
+use crate::datetime::UtcOffset;
 use crate::duration::PollInterval;
-use crate::parse::{SleepDuration, parse_datetime, parse_offset};
+use crate::parse::{SleepDuration, parse_datetime};
 use std::env;
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
@@ -47,7 +48,7 @@ pub fn parse() -> Config {
                 until_flag_seen = true;
                 while let Some(next) = args.peek() {
                     if next.starts_with('-')
-                        && (until_parts.is_empty() || parse_offset(next).is_none())
+                        && (until_parts.is_empty() || next.parse::<UtcOffset>().is_err())
                     {
                         break;
                     }
