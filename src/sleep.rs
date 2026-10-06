@@ -13,7 +13,7 @@ pub fn run_sleep(config: Config) -> i32 {
         show_progress,
         suspend_aware,
     } = config;
-    let deadline = match build_deadline(target, suspend_aware, SystemTime::now(), Instant::now()) {
+    let deadline = match build_deadline(target, suspend_aware, Instant::now()) {
         Some(deadline) => deadline,
         None => return deadline_overflow(),
     };
@@ -47,6 +47,9 @@ pub fn run_sleep(config: Config) -> i32 {
             Deadline::Wall(deadline) => deadline
                 .duration_since(SystemTime::now())
                 .unwrap_or(Duration::ZERO),
+            Deadline::SuspendAware(deadline) => deadline
+                .checked_duration_since(SuspendAwareInstant::now())
+                .unwrap_or(Duration::ZERO),
             Deadline::Monotonic(deadline) => deadline
                 .checked_duration_since(Instant::now())
                 .unwrap_or(Duration::ZERO),
@@ -74,14 +77,13 @@ pub fn run_sleep(config: Config) -> i32 {
 fn build_deadline(
     target: SleepTarget,
     suspend_aware: bool,
-    wall_now: SystemTime,
     monotonic_now: Instant,
 ) -> Option<Deadline> {
     match target {
         SleepTarget::Deadline(deadline) => Some(Deadline::Wall(deadline)),
-        SleepTarget::Duration(duration) if suspend_aware => {
-            wall_now.checked_add(duration).map(Deadline::Wall)
-        }
+        SleepTarget::Duration(duration) if suspend_aware => SuspendAwareInstant::now()
+            .checked_add(duration)
+            .map(Deadline::SuspendAware),
         SleepTarget::Duration(duration) => {
             monotonic_now.checked_add(duration).map(Deadline::Monotonic)
         }
@@ -97,9 +99,97 @@ fn display_seconds(remaining: Duration) -> Seconds {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SuspendAwareInstant(Duration);
+
+impl SuspendAwareInstant {
+    fn now() -> Self {
+        Self(suspend_aware_now())
+    }
+
+    fn checked_add(self, duration: Duration) -> Option<Self> {
+        self.0.checked_add(duration).map(Self)
+    }
+
+    fn checked_duration_since(self, earlier: Self) -> Option<Duration> {
+        self.0.checked_sub(earlier.0)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn suspend_aware_now() -> Duration {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid writable timespec and CLOCK_BOOTTIME is provided
+    // by Linux specifically for monotonic elapsed time that includes suspend.
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) };
+    assert_eq!(result, 0, "CLOCK_BOOTTIME is unavailable");
+    Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+}
+
+#[cfg(target_os = "macos")]
+fn suspend_aware_now() -> Duration {
+    #[repr(C)]
+    struct MachTimebaseInfo {
+        numer: u32,
+        denom: u32,
+    }
+
+    unsafe extern "C" {
+        fn mach_continuous_time() -> u64;
+        fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+    }
+
+    static TIMEBASE: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+    let (numer, denom) = *TIMEBASE.get_or_init(|| {
+        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+        // SAFETY: `info` has the C layout expected by mach_timebase_info and is
+        // valid for the duration of the call.
+        let result = unsafe { mach_timebase_info(&mut info) };
+        assert_eq!(result, 0, "mach_timebase_info failed");
+        assert_ne!(
+            info.denom, 0,
+            "mach_timebase_info returned a zero denominator"
+        );
+        (u64::from(info.numer), u64::from(info.denom))
+    });
+
+    // SAFETY: mach_continuous_time takes no arguments and returns a monotonic
+    // tick counter that continues advancing while the machine is suspended.
+    let ticks = unsafe { mach_continuous_time() };
+    let nanos = u128::from(ticks) * u128::from(numer) / u128::from(denom);
+    Duration::new(
+        (nanos / 1_000_000_000) as u64,
+        (nanos % 1_000_000_000) as u32,
+    )
+}
+
+#[cfg(windows)]
+fn suspend_aware_now() -> Duration {
+    use windows_sys::Win32::System::WindowsProgramming::QueryInterruptTimePrecise;
+
+    let mut interrupt_time = 0;
+    // SAFETY: `interrupt_time` is a valid writable u64. QueryInterruptTimePrecise
+    // cannot fail and reports suspend-aware interrupt time in 100 ns units.
+    unsafe { QueryInterruptTimePrecise(&mut interrupt_time) };
+
+    let seconds = interrupt_time / 10_000_000;
+    let nanos = ((interrupt_time % 10_000_000) * 100) as u32;
+    Duration::new(seconds, nanos)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn suspend_aware_now() -> Duration {
+    static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed()
+}
+
 #[derive(Debug, PartialEq)]
 enum Deadline {
     Wall(SystemTime),
+    SuspendAware(SuspendAwareInstant),
     Monotonic(Instant),
     Infinite,
 }
@@ -126,16 +216,20 @@ mod tests {
     fn absolute_deadline_is_not_rebased_when_sleep_starts() {
         let parsed_at = std::time::UNIX_EPOCH + Duration::from_secs(100);
         let target = parsed_at + Duration::from_secs(10);
-        let sleep_started_at = parsed_at + Duration::from_secs(1);
-
         assert_eq!(
-            build_deadline(
-                SleepTarget::Deadline(target),
-                true,
-                sleep_started_at,
-                Instant::now(),
-            ),
+            build_deadline(SleepTarget::Deadline(target), true, Instant::now()),
             Some(Deadline::Wall(target)),
         );
+    }
+
+    #[test]
+    fn relative_suspend_aware_duration_uses_monotonic_boot_clock() {
+        let deadline = build_deadline(
+            SleepTarget::Duration(Duration::from_secs(10)),
+            true,
+            Instant::now(),
+        );
+
+        assert!(matches!(deadline, Some(Deadline::SuspendAware(_))));
     }
 }

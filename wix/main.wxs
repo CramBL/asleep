@@ -136,7 +136,7 @@
         <Feature
             Id='Binaries'
             Title='Application'
-            Description='Installs the application binaries.'
+            Description='Installs all binaries and the license.'
             Level='1'
             ConfigurableDirectory='APPLICATIONFOLDER'
             AllowAdvertise='no'

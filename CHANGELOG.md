@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Use a suspend-aware monotonic clock for relative duration sleeps so wall-clock adjustments do not change their elapsed time.
 - Accept negative duration values that underflow to zero, matching current GNU `sleep`.
 - Correct the MSI feature description so it no longer claims that a disabled license sidecar is installed.
 - Reject compound durations within a single CLI operand, matching GNU `sleep`; pass each duration as a separate operand.

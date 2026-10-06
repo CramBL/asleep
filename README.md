@@ -19,7 +19,7 @@ An advanced, suspend-aware, and GNU sleep-compatible sleep utility with live cou
 ## Features
 
 - **Live Countdown**: Shows remaining time in the terminal (auto-disabled if not a TTY).
-- **Suspend-aware**: Compensates for system suspend/resume by polling `SystemTime` (opt out with `-m, --monotonic`).
+- **Suspend-aware**: Counts time spent suspended using a monotonic boot-time clock, without being affected by wall-clock adjustments (opt out with `-m, --monotonic`).
 - **Sleep Until**: Support for sleeping until a specific datetime.
 - **Zero dependencies**: ... Except for the platforms C runtime for signal handling.
 
