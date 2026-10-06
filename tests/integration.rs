@@ -45,6 +45,12 @@ fn test_end_of_options_marker() {
 }
 
 #[test]
+fn test_bare_end_of_options_marker_is_zero_duration() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["--no-progress", "--"]).assert().success();
+}
+
+#[test]
 fn test_end_of_options_treats_negative_value_as_duration() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
     cmd.args(["--", "-1"])

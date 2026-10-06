@@ -107,6 +107,8 @@ pub fn parse() -> Config {
             SleepDuration::Finite(duration) => SleepTarget::Duration(duration),
             SleepDuration::Saturated | SleepDuration::Infinite => SleepTarget::Infinite,
         }
+    } else if options_ended {
+        SleepTarget::Duration(Duration::ZERO)
     } else {
         die_with_usage(b"No duration or --until provided");
     };

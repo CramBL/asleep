@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Treat a lone `--` as a zero-duration sleep, matching GNU `sleep`.
+
 - Match GNU `sleep` operand whitespace handling by accepting leading whitespace and rejecting trailing whitespace.
 
 - Accept the GNU-style `--` end-of-options marker before duration operands.

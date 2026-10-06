@@ -136,6 +136,7 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::leading_whitespace(&[" 0.001"])]
 #[case::multiple_zero_units(&["0d", "0h", "0m", "0s"])]
 #[case::end_of_options(&["--", "0"])]
+#[case::bare_end_of_options(&["--"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }
