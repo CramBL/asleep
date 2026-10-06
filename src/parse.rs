@@ -403,7 +403,7 @@ fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<i32>), ParseDat
     Ok((hour, min, sec, offset))
 }
 
-fn parse_offset(s: &str) -> Option<i32> {
+pub(crate) fn parse_offset(s: &str) -> Option<i32> {
     let s = s.trim();
     if s.is_empty() {
         return None;

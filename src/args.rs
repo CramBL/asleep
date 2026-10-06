@@ -1,5 +1,5 @@
 use crate::duration::PollInterval;
-use crate::parse::{parse_datetime, parse_duration};
+use crate::parse::{parse_datetime, parse_duration, parse_offset};
 use std::env;
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
@@ -40,7 +40,9 @@ pub fn parse() -> Config {
             "-u" | "--until" => {
                 until_flag_seen = true;
                 while let Some(next) = args.peek() {
-                    if next.starts_with('-') {
+                    if next.starts_with('-')
+                        && (until_parts.is_empty() || parse_offset(next).is_none())
+                    {
                         break;
                     }
                     until_parts.push(args.next().unwrap());

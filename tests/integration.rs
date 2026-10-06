@@ -154,6 +154,19 @@ fn test_until_full_date() {
 }
 
 #[test]
+fn test_until_separate_negative_offset() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args([
+        "--until",
+        "2099-01-01",
+        "12:00:00",
+        "-05:00",
+        "--no-progress",
+    ]);
+    assert_interrupted(cmd, Duration::from_secs(3));
+}
+
+#[test]
 fn test_no_progress_flag() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
     cmd.args(["1s", "--no-progress"])
