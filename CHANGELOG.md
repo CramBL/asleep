@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Reject whitespace between a leading `+` and a duration operand, matching GNU `sleep`.
+
 - Accept GNU sleep-compatible hexadecimal exponents beyond the native integer range.
 
 - Accept GNU-style unambiguous abbreviations of the standard `--help` and `--version` options.

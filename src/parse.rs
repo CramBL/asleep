@@ -62,7 +62,18 @@ impl FromStr for SleepDuration {
                 .map(|_| Self::Finite(Duration::ZERO));
         }
 
-        let input = input.strip_prefix('+').unwrap_or(input);
+        let input = if let Some(input) = input.strip_prefix('+') {
+            if input
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_whitespace())
+            {
+                return Err(ParseDurationError::InvalidInput);
+            }
+            input
+        } else {
+            input
+        };
 
         if input.parse::<InfiniteDuration>().is_ok() {
             return Ok(Self::Infinite);
@@ -964,6 +975,13 @@ mod tests {
             input.parse::<SleepDuration>().unwrap(),
             SleepDuration::Infinite
         );
+    }
+
+    #[rstest]
+    #[case::finite("+ 0")]
+    #[case::infinite("+ inf")]
+    fn test_positive_sign_must_be_attached(#[case] input: &str) {
+        assert!(input.parse::<SleepDuration>().is_err());
     }
 
     #[rstest]

@@ -126,6 +126,8 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::trailing_whitespace(&["0.001 "])]
 #[case::negative_decimal_underflow(&["--", "-1e-9999"])]
 #[case::negative_hex_underflow(&["--", "-0x1p-99999"])]
+#[case::separated_positive_sign(&["+ 0"])]
+#[case::separated_positive_infinity_sign(&["+ inf"])]
 fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Failure, Duration::from_millis(250));
 }
