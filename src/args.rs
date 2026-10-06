@@ -40,11 +40,20 @@ pub fn parse() -> Config {
 
         match s.as_str() {
             "--" => options_ended = true,
-            "-h" | "--help" => {
+            "-h" => {
                 print_usage(&mut io::stdout().lock());
                 std::process::exit(0);
             }
-            "-V" | "--version" => {
+            _ if s.starts_with("--") && "--help".starts_with(s.as_str()) => {
+                print_usage(&mut io::stdout().lock());
+                std::process::exit(0);
+            }
+            "-V" => {
+                let mut stdout = io::stdout().lock();
+                let _ = writeln!(stdout, "asleep {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            _ if s.starts_with("--") && "--version".starts_with(s.as_str()) => {
                 let mut stdout = io::stdout().lock();
                 let _ = writeln!(stdout, "asleep {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);

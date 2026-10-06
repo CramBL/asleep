@@ -171,6 +171,34 @@ fn accepts_gnu_hexadecimal_floating_point_operands(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }
 
+#[rstest]
+#[case::help_shortest("--h")]
+#[case::help_prefix("--he\u{6c}")]
+#[case::help_full("--help")]
+#[case::version_shortest("--v")]
+#[case::version_prefix("--vers")]
+#[case::version_full("--version")]
+fn accepts_same_standard_option_abbreviations_as_gnu_sleep(#[case] option: &str) {
+    let Some(gnu) = gnu_sleep() else {
+        return;
+    };
+    let asleep = PathBuf::from(assert_cmd::cargo::cargo_bin!("asleep"));
+    let timeout = Duration::from_millis(250);
+
+    let reference = run_with_timeout(&gnu, &[option], timeout, None);
+    let actual = run_with_timeout(&asleep, &[option], timeout, None);
+
+    assert_eq!(
+        reference,
+        Outcome::Success,
+        "unexpected GNU sleep behavior for {option}"
+    );
+    assert_eq!(
+        actual, reference,
+        "asleep differs from GNU sleep for {option}"
+    );
+}
+
 fn comma_decimal_locale() -> Option<String> {
     let output = Command::new("locale").arg("-a").output().ok()?;
     if !output.status.success() {

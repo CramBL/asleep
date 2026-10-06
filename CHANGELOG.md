@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept GNU-style unambiguous abbreviations of the standard `--help` and `--version` options.
+
 - Accept a leading `+` on GNU sleep-compatible infinite duration operands.
 
 - Treat a lone `--` as a zero-duration sleep, matching GNU `sleep`.
