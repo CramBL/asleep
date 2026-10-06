@@ -1,5 +1,5 @@
 use crate::datetime::{
-    DateTime, Day, Hour24, Minute, Month, Second, UtcOffset, Year, from_unix_timestamp,
+    DateTime, Day, Hour24, Minute, Month, Second, TimeOfDay, UtcOffset, Year, from_unix_timestamp,
     to_unix_timestamp,
 };
 use crate::utc_offset::utc_offset_seconds_at;
@@ -314,6 +314,129 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
         })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Meridiem {
+    Am,
+    Pm,
+}
+
+impl FromStr for Meridiem {
+    type Err = ParseDateTimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("am") {
+            Ok(Self::Am)
+        } else if s.eq_ignore_ascii_case("pm") {
+            Ok(Self::Pm)
+        } else {
+            Err(ParseDateTimeError::InvalidFormat)
+        }
+    }
+}
+
+impl Meridiem {
+    fn to_24_hour(self, hour: u8) -> Result<Hour24, ParseDateTimeError> {
+        if !(1..=12).contains(&hour) {
+            return Err(ParseDateTimeError::InvalidValue);
+        }
+
+        let hour = match (self, hour) {
+            (Self::Am, 12) => 0,
+            (Self::Pm, 12) => 12,
+            (Self::Pm, hour) => hour + 12,
+            (Self::Am, hour) => hour,
+        };
+
+        Hour24::new(hour).ok_or(ParseDateTimeError::InvalidValue)
+    }
+}
+
+impl FromStr for TimeOfDay {
+    type Err = ParseDateTimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let (time, meridiem) = split_meridiem(s);
+
+        let mut parts = time.split(':');
+        let hour = parse_u8(parts.next().ok_or(ParseDateTimeError::InvalidFormat)?)?;
+        let minute = match parts.next() {
+            Some(value) => parse_u8(value)?,
+            None if meridiem.is_some() => 0,
+            None => return Err(ParseDateTimeError::InvalidFormat),
+        };
+        let second = match parts.next() {
+            Some(value) => parse_u8(value)?,
+            None => 0,
+        };
+        if parts.next().is_some() {
+            return Err(ParseDateTimeError::InvalidFormat);
+        }
+
+        let hour = match meridiem {
+            Some(meridiem) => meridiem.to_24_hour(hour)?,
+            None => Hour24::new(hour).ok_or(ParseDateTimeError::InvalidValue)?,
+        };
+        let minute = Minute::new(minute).ok_or(ParseDateTimeError::InvalidValue)?;
+        let second = Second::new(second).ok_or(ParseDateTimeError::InvalidValue)?;
+
+        Ok(Self {
+            hour,
+            minute,
+            second,
+        })
+    }
+}
+
+fn split_meridiem(s: &str) -> (&str, Option<Meridiem>) {
+    let Some(suffix_start) = s.len().checked_sub(2) else {
+        return (s, None);
+    };
+    let Some((time, suffix)) = s.split_at_checked(suffix_start) else {
+        return (s, None);
+    };
+    let Ok(meridiem) = suffix.parse::<Meridiem>() else {
+        return (s, None);
+    };
+
+    (time.trim(), Some(meridiem))
+}
+
+fn strip_ascii_suffix_ignore_case<'a>(s: &'a str, suffix: &str) -> Option<&'a str> {
+    let suffix_start = s.len().checked_sub(suffix.len())?;
+    let (prefix, actual_suffix) = s.split_at_checked(suffix_start)?;
+    actual_suffix.eq_ignore_ascii_case(suffix).then_some(prefix)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TimeSpec {
+    time: TimeOfDay,
+    offset: Option<UtcOffset>,
+}
+
+impl FromStr for TimeSpec {
+    type Err = ParseDateTimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let (time, offset) = if let Some(time) = s.strip_suffix('Z') {
+            (time, Some(UtcOffset::from_seconds(0)))
+        } else if let Some(time) = strip_ascii_suffix_ignore_case(s, "utc") {
+            (time.trim(), Some(UtcOffset::from_seconds(0)))
+        } else if let Some(pos) = s.find(['+', '-']) {
+            let (time, offset) = s.split_at(pos);
+            (time.trim(), Some(offset.parse::<UtcOffset>()?))
+        } else {
+            (s, None)
+        };
+
+        Ok(Self {
+            time: time.parse::<TimeOfDay>()?,
+            offset,
+        })
+    }
+}
+
 pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateTimeError> {
     parse_datetime_with(s, now, |dt| {
         utc_offset_seconds_at(dt).ok_or(ParseDateTimeError::InvalidValue)
@@ -360,11 +483,14 @@ where
         let month = parse_u8(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)?;
         let day = parse_u8(s.get(8..10).ok_or(ParseDateTimeError::InvalidFormat)?)?;
 
-        let (h, min, sec, target_offset) = if s.len() > 11 {
+        let time_spec = if s.len() > 11 {
             let time_part = s.get(11..).ok_or(ParseDateTimeError::InvalidFormat)?;
-            parse_time(time_part)?
+            time_part.parse::<TimeSpec>()?
         } else {
-            (Hour24(0), Minute(0), Second(0), None)
+            TimeSpec {
+                time: TimeOfDay::MIDNIGHT,
+                offset: None,
+            }
         };
 
         let y = Year(year);
@@ -374,12 +500,12 @@ where
             year: y,
             month: m,
             day: d,
-            hour: h,
-            minute: min,
-            second: sec,
+            hour: time_spec.time.hour,
+            minute: time_spec.time.minute,
+            second: time_spec.time.second,
         };
 
-        let ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
+        let ts_utc = target_to_utc(target_dt, time_spec.offset, &mut utc_offset_at)?;
         let target = UNIX_EPOCH
             .checked_add(Duration::from_secs(ts_utc))
             .ok_or(ParseDateTimeError::Overflow)?;
@@ -389,25 +515,25 @@ where
         return Ok(target);
     }
 
-    if let Ok((h, min, sec, target_offset)) = parse_time(s) {
-        let current_dt = match target_offset {
+    if let Ok(time_spec) = s.parse::<TimeSpec>() {
+        let current_dt = match time_spec.offset {
             Some(offset) => datetime_at_offset(now_ts_utc, offset)?,
             None => local_datetime_at(now_ts_utc, &mut utc_offset_at)?,
         };
         let mut target_dt = DateTime {
-            hour: h,
-            minute: min,
-            second: sec,
+            hour: time_spec.time.hour,
+            minute: time_spec.time.minute,
+            second: time_spec.time.second,
             ..current_dt
         };
 
-        let mut ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
+        let mut ts_utc = target_to_utc(target_dt, time_spec.offset, &mut utc_offset_at)?;
         let mut target = UNIX_EPOCH
             .checked_add(Duration::from_secs(ts_utc))
             .ok_or(ParseDateTimeError::Overflow)?;
         if target <= now {
             target_dt = next_calendar_day(target_dt)?;
-            ts_utc = target_to_utc(target_dt, target_offset, &mut utc_offset_at)?;
+            ts_utc = target_to_utc(target_dt, time_spec.offset, &mut utc_offset_at)?;
             target = UNIX_EPOCH
                 .checked_add(Duration::from_secs(ts_utc))
                 .ok_or(ParseDateTimeError::Overflow)?;
@@ -426,19 +552,19 @@ fn target_tomorrow_time<F>(
 where
     F: FnMut(DateTime) -> Result<i32, ParseDateTimeError>,
 {
-    let (h, min, sec, target_offset) = parse_time(time_part)?;
-    let current_dt = match target_offset {
+    let time_spec = time_part.parse::<TimeSpec>()?;
+    let current_dt = match time_spec.offset {
         Some(offset) => datetime_at_offset(now_ts_utc, offset)?,
         None => local_datetime_at(now_ts_utc, utc_offset_at)?,
     };
     let tomorrow = next_calendar_day(current_dt)?;
     let target_dt = DateTime {
-        hour: h,
-        minute: min,
-        second: sec,
+        hour: time_spec.time.hour,
+        minute: time_spec.time.minute,
+        second: time_spec.time.second,
         ..tomorrow
     };
-    let target_as_utc = target_to_utc(target_dt, target_offset, utc_offset_at)?;
+    let target_as_utc = target_to_utc(target_dt, time_spec.offset, utc_offset_at)?;
     UNIX_EPOCH
         .checked_add(Duration::from_secs(target_as_utc))
         .ok_or(ParseDateTimeError::Overflow)
@@ -516,78 +642,6 @@ where
             .checked_add(used_offset.unsigned_abs() as u64)
             .ok_or(ParseDateTimeError::InvalidValue)
     }
-}
-
-fn parse_time(s: &str) -> Result<(Hour24, Minute, Second, Option<UtcOffset>), ParseDateTimeError> {
-    let s = s.trim();
-
-    let (time_part_raw, offset) = if let Some(stripped) = s.strip_suffix('Z') {
-        (stripped, Some(UtcOffset::from_seconds(0)))
-    } else if s.to_ascii_lowercase().ends_with("utc") {
-        let len = s.len() - 3;
-        (s[..len].trim(), Some(UtcOffset::from_seconds(0)))
-    } else if let Some(pos) = s.find(['+', '-']) {
-        let (t, o_str) = s.split_at(pos);
-        let offset = o_str.parse::<UtcOffset>()?;
-        (t.trim(), Some(offset))
-    } else {
-        (s, None)
-    };
-
-    let (time_part, am_pm) =
-        if let Some(_stripped) = time_part_raw.to_ascii_lowercase().strip_suffix("am") {
-            (time_part_raw[..time_part_raw.len() - 2].trim(), Some(false))
-        } else if let Some(_stripped) = time_part_raw.to_ascii_lowercase().strip_suffix("pm") {
-            (time_part_raw[..time_part_raw.len() - 2].trim(), Some(true))
-        } else {
-            (time_part_raw, None)
-        };
-
-    let mut parts = time_part.split(':');
-    let h_str = parts.next().ok_or(ParseDateTimeError::InvalidFormat)?;
-    let m_str = parts.next();
-    let s_str = parts.next();
-    if parts.next().is_some() {
-        return Err(ParseDateTimeError::InvalidFormat);
-    }
-
-    let h_raw = parse_u8(h_str)?;
-    let m = if let Some(m_val) = m_str {
-        parse_u8(m_val)?
-    } else {
-        // Minutes are optional ONLY if am/pm is provided
-        if am_pm.is_none() {
-            return Err(ParseDateTimeError::InvalidFormat);
-        }
-        0
-    };
-    let s = if let Some(s_val) = s_str {
-        parse_u8(s_val)?
-    } else {
-        0
-    };
-
-    let h = match am_pm {
-        Some(is_pm) => {
-            if h_raw == 0 || h_raw > 12 {
-                return Err(ParseDateTimeError::InvalidValue);
-            }
-            if is_pm {
-                if h_raw == 12 { 12 } else { h_raw + 12 }
-            } else if h_raw == 12 {
-                0
-            } else {
-                h_raw
-            }
-        }
-        None => h_raw,
-    };
-
-    let hour = Hour24::new(h).ok_or(ParseDateTimeError::InvalidValue)?;
-    let min = Minute::new(m).ok_or(ParseDateTimeError::InvalidValue)?;
-    let sec = Second::new(s).ok_or(ParseDateTimeError::InvalidValue)?;
-
-    Ok((hour, min, sec, offset))
 }
 
 #[cfg(test)]
@@ -684,6 +738,51 @@ mod tests {
         assert_eq!(
             parse_duration("9999999999999999999d").err(),
             Some(ParseDurationError::Overflow)
+        );
+    }
+
+    #[test]
+    fn test_time_of_day_parsing() {
+        assert_eq!(
+            "06:30:15".parse::<TimeOfDay>().unwrap(),
+            TimeOfDay {
+                hour: Hour24(6),
+                minute: Minute(30),
+                second: Second(15),
+            }
+        );
+        assert_eq!(
+            "6pm".parse::<TimeOfDay>().unwrap(),
+            TimeOfDay {
+                hour: Hour24(18),
+                minute: Minute(0),
+                second: Second(0),
+            }
+        );
+        assert_eq!("12am".parse::<TimeOfDay>().unwrap(), TimeOfDay::MIDNIGHT);
+        assert_eq!(
+            "11:30PM".parse::<TimeOfDay>().unwrap(),
+            TimeOfDay {
+                hour: Hour24(23),
+                minute: Minute(30),
+                second: Second(0),
+            }
+        );
+    }
+
+    #[test]
+    fn test_time_of_day_rejects_invalid_values() {
+        assert_eq!(
+            "0pm".parse::<TimeOfDay>(),
+            Err(ParseDateTimeError::InvalidValue)
+        );
+        assert_eq!(
+            "06".parse::<TimeOfDay>(),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
+        assert_eq!(
+            "24:00".parse::<TimeOfDay>(),
+            Err(ParseDateTimeError::InvalidValue)
         );
     }
 
@@ -810,29 +909,33 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_time_utc() {
-        let (h, _m, _s, offset) = parse_time("23:59Z").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(0)));
-        assert_eq!(h, Hour24(23));
+    fn test_time_spec_utc() {
+        let spec = "23:59Z".parse::<TimeSpec>().unwrap();
+        assert_eq!(spec.offset, Some(UtcOffset::from_seconds(0)));
+        assert_eq!(spec.time.hour, Hour24(23));
 
-        let (h, _m, _s, offset) = parse_time("12:00 UTC").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(0)));
-        assert_eq!(h, Hour24(12));
+        let spec = "12:00 UTC".parse::<TimeSpec>().unwrap();
+        assert_eq!(spec.offset, Some(UtcOffset::from_seconds(0)));
+        assert_eq!(spec.time.hour, Hour24(12));
 
-        let (_h, _m, _s, offset) = parse_time("08:00").unwrap();
-        assert_eq!(offset, None);
+        let spec = "08:00".parse::<TimeSpec>().unwrap();
+        assert_eq!(spec.offset, None);
     }
 
     #[test]
-    fn test_parse_time_offset() {
-        let (_, _, _, offset) = parse_time("12:00+02:00").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(7200)));
-
-        let (_, _, _, offset) = parse_time("12:00-05:00").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(-18000)));
-
-        let (_, _, _, offset) = parse_time("12:00+0530").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(19800)));
+    fn test_time_spec_offset() {
+        assert_eq!(
+            "12:00+02:00".parse::<TimeSpec>().unwrap().offset,
+            Some(UtcOffset::from_seconds(7200))
+        );
+        assert_eq!(
+            "12:00-05:00".parse::<TimeSpec>().unwrap().offset,
+            Some(UtcOffset::from_seconds(-18000))
+        );
+        assert_eq!(
+            "12:00+0530".parse::<TimeSpec>().unwrap().offset,
+            Some(UtcOffset::from_seconds(19800))
+        );
     }
 
     #[test]
@@ -863,88 +966,78 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_time_am_midnight() {
-        let (h, m, _s, _o) = parse_time("12:00am").unwrap();
-        assert_eq!(h, Hour24(0));
-        assert_eq!(m, Minute(0));
-
-        let (h, m, _s, _o) = parse_time("12:30am").unwrap();
-        assert_eq!(h, Hour24(0));
-        assert_eq!(m, Minute(30));
+    fn test_time_of_day_am_midnight() {
+        assert_eq!("12:00am".parse::<TimeOfDay>().unwrap(), TimeOfDay::MIDNIGHT);
+        assert_eq!(
+            "12:30am".parse::<TimeOfDay>().unwrap(),
+            TimeOfDay {
+                hour: Hour24(0),
+                minute: Minute(30),
+                second: Second(0),
+            }
+        );
     }
 
     #[test]
-    fn test_parse_time_am_morning() {
-        let (h, _m, _s, _o) = parse_time("1:00am").unwrap();
-        assert_eq!(h, Hour24(1));
-
-        let (h, _m, _s, _o) = parse_time("11:59am").unwrap();
-        assert_eq!(h, Hour24(11));
+    fn test_time_of_day_am_morning() {
+        assert_eq!("1:00am".parse::<TimeOfDay>().unwrap().hour, Hour24(1));
+        assert_eq!("11:59am".parse::<TimeOfDay>().unwrap().hour, Hour24(11));
     }
 
     #[test]
-    fn test_parse_time_pm_noon() {
-        let (h, m, _s, _o) = parse_time("12:00pm").unwrap();
-        assert_eq!(h, Hour24(12));
-        assert_eq!(m, Minute(0));
+    fn test_time_of_day_pm() {
+        let noon = "12:00pm".parse::<TimeOfDay>().unwrap();
+        assert_eq!(noon.hour, Hour24(12));
+        assert_eq!(noon.minute, Minute(0));
 
-        let (h, m, _s, _o) = parse_time("12:30pm").unwrap();
-        assert_eq!(h, Hour24(12));
-        assert_eq!(m, Minute(30));
+        let afternoon = "12:30pm".parse::<TimeOfDay>().unwrap();
+        assert_eq!(afternoon.hour, Hour24(12));
+        assert_eq!(afternoon.minute, Minute(30));
+
+        assert_eq!("1:00pm".parse::<TimeOfDay>().unwrap().hour, Hour24(13));
+        assert_eq!("11:59pm".parse::<TimeOfDay>().unwrap().hour, Hour24(23));
     }
 
     #[test]
-    fn test_parse_time_pm_evening() {
-        let (h, _m, _s, _o) = parse_time("1:00pm").unwrap();
-        assert_eq!(h, Hour24(13));
-
-        let (h, _m, _s, _o) = parse_time("11:59pm").unwrap();
-        assert_eq!(h, Hour24(23));
+    fn test_time_of_day_am_pm_case_insensitivity() {
+        assert_eq!("1:00AM".parse::<TimeOfDay>().unwrap().hour, Hour24(1));
+        assert_eq!("1:00Pm".parse::<TimeOfDay>().unwrap().hour, Hour24(13));
     }
 
     #[test]
-    fn test_parse_time_am_pm_case_insensitivity() {
-        let (h, _m, _s, _o) = parse_time("1:00AM").unwrap();
-        assert_eq!(h, Hour24(1));
-
-        let (h, _m, _s, _o) = parse_time("1:00Pm").unwrap();
-        assert_eq!(h, Hour24(13));
+    fn test_time_of_day_am_pm_with_seconds() {
+        let time = "1:00:05pm".parse::<TimeOfDay>().unwrap();
+        assert_eq!(time.hour, Hour24(13));
+        assert_eq!(time.second, Second(5));
     }
 
     #[test]
-    fn test_parse_time_am_pm_with_seconds() {
-        let (h, _m, s, _o) = parse_time("1:00:05pm").unwrap();
-        assert_eq!(h, Hour24(13));
-        assert_eq!(s, Second(5));
+    fn test_time_spec_am_pm_with_offset() {
+        assert_eq!(
+            "1:00pm+02:00".parse::<TimeSpec>().unwrap().offset,
+            Some(UtcOffset::from_seconds(7200))
+        );
     }
 
     #[test]
-    fn test_parse_time_am_pm_with_offset() {
-        let (_, _, _, offset) = parse_time("1:00pm+02:00").unwrap();
-        assert_eq!(offset, Some(UtcOffset::from_seconds(7200)));
+    fn test_time_of_day_am_pm_hour_only() {
+        let evening = "6pm".parse::<TimeOfDay>().unwrap();
+        assert_eq!(evening.hour, Hour24(18));
+        assert_eq!(evening.minute, Minute(0));
+
+        assert_eq!("12am".parse::<TimeOfDay>().unwrap(), TimeOfDay::MIDNIGHT);
+
+        let noon = "12PM".parse::<TimeOfDay>().unwrap();
+        assert_eq!(noon.hour, Hour24(12));
+        assert_eq!(noon.minute, Minute(0));
     }
 
     #[test]
-    fn test_parse_time_am_pm_hour_only() {
-        let (h, m, _s, _o) = parse_time("6pm").unwrap();
-        assert_eq!(h, Hour24(18));
-        assert_eq!(m, Minute(0));
-
-        let (h, m, _s, _o) = parse_time("12am").unwrap();
-        assert_eq!(h, Hour24(0));
-        assert_eq!(m, Minute(0));
-
-        let (h, m, _s, _o) = parse_time("12PM").unwrap();
-        assert_eq!(h, Hour24(12));
-        assert_eq!(m, Minute(0));
-    }
-
-    #[test]
-    fn test_parse_time_am_pm_invalid_hours() {
-        assert!(parse_time("0:00am").is_err());
-        assert!(parse_time("13:00am").is_err());
-        assert!(parse_time("0:00pm").is_err());
-        assert!(parse_time("13:00pm").is_err());
+    fn test_time_of_day_am_pm_invalid_hours() {
+        assert!("0:00am".parse::<TimeOfDay>().is_err());
+        assert!("13:00am".parse::<TimeOfDay>().is_err());
+        assert!("0:00pm".parse::<TimeOfDay>().is_err());
+        assert!("13:00pm".parse::<TimeOfDay>().is_err());
     }
 
     #[test]

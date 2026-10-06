@@ -12,6 +12,21 @@ pub struct Minute(pub u8);
 pub struct Second(pub u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeOfDay {
+    pub hour: Hour24,
+    pub minute: Minute,
+    pub second: Second,
+}
+
+impl TimeOfDay {
+    pub const MIDNIGHT: Self = Self {
+        hour: Hour24(0),
+        minute: Minute(0),
+        second: Second(0),
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UtcOffset(i32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
