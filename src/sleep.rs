@@ -168,11 +168,16 @@ fn suspend_aware_now() -> Duration {
 
 #[cfg(windows)]
 fn suspend_aware_now() -> Duration {
-    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+    use windows_sys::Win32::System::WindowsProgramming::QueryInterruptTimePrecise;
 
-    // SAFETY: GetTickCount64 takes no arguments and cannot fail. Its elapsed
-    // time includes time spent in sleep or hibernation.
-    Duration::from_millis(unsafe { GetTickCount64() })
+    let mut interrupt_time = 0;
+    // SAFETY: `interrupt_time` is a valid writable u64. QueryInterruptTimePrecise
+    // cannot fail and reports suspend-aware interrupt time in 100 ns units.
+    unsafe { QueryInterruptTimePrecise(&mut interrupt_time) };
+
+    let seconds = interrupt_time / 10_000_000;
+    let nanos = ((interrupt_time % 10_000_000) * 100) as u32;
+    Duration::new(seconds, nanos)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
