@@ -145,6 +145,8 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::negative_zero_hex(&["--", "-0x0p0"])]
 #[case::positive_decimal_underflow(&["1e-9999"])]
 #[case::positive_hex_underflow(&["0x1p-1075"])]
+#[case::extreme_hex_underflow(&["0x1p-999999999999999999999999"])]
+#[case::extreme_zero_hex_exponent(&["0x0p999999999999999999999999"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }
@@ -161,6 +163,8 @@ fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::huge_scientific(&["1e400"])]
 #[case::beyond_u64_seconds(&["18446744073709551616"])]
 #[case::huge_unit_scaled_integer(&["9999999999999999999d"])]
+#[case::hex_overflow(&["0x1p1024"])]
+#[case::extreme_hex_overflow(&["0x1p999999999999999999999999"])]
 fn accepts_the_same_long_running_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::TimedOut, Duration::from_millis(100));
 }

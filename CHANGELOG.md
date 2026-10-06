@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept GNU sleep-compatible hexadecimal exponents beyond the native integer range.
+
 - Accept GNU-style unambiguous abbreviations of the standard `--help` and `--version` options.
 
 - Accept a leading `+` on GNU sleep-compatible infinite duration operands.

@@ -278,6 +278,37 @@ impl std::str::FromStr for DurationNumber {
 }
 
 #[derive(Debug, Clone, Copy)]
+enum HexExponent {
+    InRange(i32),
+    TooNegative,
+    TooPositive,
+}
+
+impl FromStr for HexExponent {
+    type Err = ParseDurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (negative, digits) = if let Some(digits) = s.strip_prefix('-') {
+            (true, digits)
+        } else if let Some(digits) = s.strip_prefix('+') {
+            (false, digits)
+        } else {
+            (false, s)
+        };
+
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(ParseDurationError::InvalidNumber);
+        }
+
+        match s.parse::<i32>() {
+            Ok(exponent) => Ok(Self::InRange(exponent)),
+            Err(_) if negative => Ok(Self::TooNegative),
+            Err(_) => Ok(Self::TooPositive),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 struct HexFloat(f64);
 
 impl FromStr for HexFloat {
@@ -298,20 +329,47 @@ impl FromStr for HexFloat {
                 let (significand, exponent) = input
                     .rsplit_once(['p', 'P'])
                     .ok_or(ParseDurationError::InvalidNumber)?;
-                let exponent = exponent
-                    .parse::<i32>()
-                    .map_err(|_| ParseDurationError::InvalidNumber)?;
-                if exponent >= -1074 {
-                    return Err(ParseDurationError::InvalidNumber);
-                }
+                let exponent = exponent.parse::<HexExponent>()?;
 
-                let scaled_exponent = exponent
-                    .checked_add(1074)
-                    .ok_or(ParseDurationError::InvalidNumber)?;
-                let scaled =
-                    hexf_parse::parse_hexf64(&format!("{significand}p{scaled_exponent}"), false)
+                match exponent {
+                    HexExponent::InRange(exponent) if exponent < -1074 => {
+                        let scaled_exponent = exponent
+                            .checked_add(1074)
+                            .ok_or(ParseDurationError::InvalidNumber)?;
+                        let scaled = hexf_parse::parse_hexf64(
+                            &format!("{significand}p{scaled_exponent}"),
+                            false,
+                        )
                         .map_err(|_| ParseDurationError::InvalidNumber)?;
-                Ok(Self(scaled * f64::from_bits(1)))
+                        Ok(Self(scaled * f64::from_bits(1)))
+                    }
+                    HexExponent::InRange(exponent) if exponent >= 1024 => {
+                        let significand =
+                            hexf_parse::parse_hexf64(&format!("{significand}p0"), false)
+                                .map_err(|_| ParseDurationError::InvalidNumber)?;
+                        Ok(Self(if significand == 0.0 {
+                            0.0
+                        } else {
+                            f64::INFINITY
+                        }))
+                    }
+                    HexExponent::TooNegative => {
+                        hexf_parse::parse_hexf64(&format!("{significand}p0"), false)
+                            .map_err(|_| ParseDurationError::InvalidNumber)?;
+                        Ok(Self(0.0))
+                    }
+                    HexExponent::TooPositive => {
+                        let significand =
+                            hexf_parse::parse_hexf64(&format!("{significand}p0"), false)
+                                .map_err(|_| ParseDurationError::InvalidNumber)?;
+                        Ok(Self(if significand == 0.0 {
+                            0.0
+                        } else {
+                            f64::INFINITY
+                        }))
+                    }
+                    HexExponent::InRange(_) => Err(ParseDurationError::InvalidNumber),
+                }
             }
         }
     }
@@ -854,9 +912,22 @@ mod tests {
         assert_eq!(parse_duration(input).unwrap(), expected);
     }
 
-    #[test]
-    fn test_gnu_hexadecimal_positive_underflow() {
-        assert_eq!(parse_duration("0x1p-1075").unwrap(), Duration::ZERO);
+    #[rstest]
+    #[case::subnormal_boundary("0x1p-1075")]
+    #[case::extreme_exponent("0x1p-999999999999999999999999")]
+    #[case::zero_with_extreme_positive_exponent("0x0p999999999999999999999999")]
+    fn test_gnu_hexadecimal_positive_underflow(#[case] input: &str) {
+        assert_eq!(parse_duration(input).unwrap(), Duration::ZERO);
+    }
+
+    #[rstest]
+    #[case::f64_boundary("0x1p1024")]
+    #[case::extreme_exponent("0x1p999999999999999999999999")]
+    fn test_gnu_hexadecimal_positive_overflow_saturates(#[case] input: &str) {
+        assert_eq!(
+            input.parse::<SleepDuration>().unwrap(),
+            SleepDuration::Saturated
+        );
     }
 
     #[test]
