@@ -85,6 +85,13 @@ fn test_duration_sleep() {
 }
 
 #[test]
+fn test_infinite_duration() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["inf", "--no-progress"]);
+    assert_interrupted(cmd, Duration::from_millis(200));
+}
+
+#[test]
 fn test_multiple_durations() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
     let now = std::time::Instant::now();

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept GNU sleep-compatible fractional and scientific-notation durations, plus `inf` for indefinite sleeps.
 - Preserve the absolute `--until` deadline so argument parsing and setup time cannot extend the sleep.
 - Accept negative UTC offsets passed as a separate token to `--until`.
 - Round the progress countdown up so it does not display one second less than the remaining sleep time.

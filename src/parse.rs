@@ -1,7 +1,6 @@
 use crate::datetime::{
     DateTime, Day, Hour24, Minute, Month, Second, Year, from_unix_timestamp, to_unix_timestamp,
 };
-use crate::duration::{Days, Hours, Minutes, Seconds};
 use crate::utc_offset::utc_offset_seconds_at;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -83,49 +82,81 @@ pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
         return Err(ParseDurationError::EmptyInput);
     }
 
-    let mut total_seconds = Seconds(0);
+    let mut total = Duration::ZERO;
     let mut i = 0;
     let bytes = s.as_bytes();
 
     while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_digit() {
-            let start = i;
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        let mut has_digit = false;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            has_digit = true;
+            i += 1;
+        }
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                has_digit = true;
+                i += 1;
+            }
+        }
+        if !has_digit {
+            return Err(ParseDurationError::InvalidInput);
+        }
+        if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+            i += 1;
+            if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {
+                i += 1;
+            }
+            let exponent_start = i;
             while i < bytes.len() && bytes[i].is_ascii_digit() {
                 i += 1;
             }
-            let num = parse_u64(&s[start..i]).ok_or(ParseDurationError::InvalidNumber)?;
-
-            if i < bytes.len() {
-                let unit = bytes[i].to_ascii_lowercase();
-                let multiplier: Seconds = match unit {
-                    b's' => Seconds(1),
-                    b'm' => Minutes(1).into(),
-                    b'h' => Hours(1).into(),
-                    b'd' => Days(1).into(),
-                    _ => return Err(ParseDurationError::InvalidUnit),
-                };
-                i += 1;
-                let added_seconds = num
-                    .checked_mul(multiplier.0)
-                    .map(Seconds)
-                    .ok_or(ParseDurationError::Overflow)?;
-                total_seconds = total_seconds
-                    .checked_add(added_seconds)
-                    .ok_or(ParseDurationError::Overflow)?;
-            } else {
-                total_seconds = total_seconds
-                    .checked_add(Seconds(num))
-                    .ok_or(ParseDurationError::Overflow)?;
+            if i == exponent_start {
+                return Err(ParseDurationError::InvalidNumber);
             }
-        } else if c.is_ascii_whitespace() {
-            i += 1;
-        } else {
-            return Err(ParseDurationError::InvalidInput);
         }
+
+        let number = &s[start..i];
+        let multiplier = if i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+            let multiplier = match bytes[i].to_ascii_lowercase() {
+                b's' => 1,
+                b'm' => 60,
+                b'h' => 3600,
+                b'd' => 86400,
+                _ => return Err(ParseDurationError::InvalidUnit),
+            };
+            i += 1;
+            multiplier
+        } else {
+            1
+        };
+
+        let part = if number.bytes().any(|b| matches!(b, b'.' | b'e' | b'E')) {
+            let value = number
+                .parse::<f64>()
+                .map_err(|_| ParseDurationError::InvalidNumber)?;
+            let seconds = value * multiplier as f64;
+            Duration::try_from_secs_f64(seconds).map_err(|_| ParseDurationError::Overflow)?
+        } else {
+            let value = parse_u64(number).ok_or(ParseDurationError::InvalidNumber)?;
+            let seconds = value
+                .checked_mul(multiplier)
+                .ok_or(ParseDurationError::Overflow)?;
+            Duration::from_secs(seconds)
+        };
+
+        total = total
+            .checked_add(part)
+            .ok_or(ParseDurationError::Overflow)?;
     }
 
-    Ok(Duration::from_secs(total_seconds.0))
+    Ok(total)
 }
 
 pub fn parse_datetime(s: &str, now: SystemTime) -> Result<SystemTime, ParseDateTimeError> {
@@ -449,6 +480,13 @@ mod tests {
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
         assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86400));
+    }
+
+    #[test]
+    fn test_gnu_numeric_formats() {
+        assert_eq!(parse_duration("0.5s").unwrap(), Duration::from_millis(500));
+        assert_eq!(parse_duration("1e-3").unwrap(), Duration::from_millis(1));
+        assert_eq!(parse_duration("1.5m").unwrap(), Duration::from_secs(90));
     }
 
     #[test]

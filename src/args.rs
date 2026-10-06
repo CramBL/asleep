@@ -14,6 +14,7 @@ pub struct Config {
 pub enum SleepTarget {
     Duration(Duration),
     Deadline(SystemTime),
+    Infinite,
 }
 
 pub fn parse() -> Config {
@@ -88,7 +89,12 @@ pub fn parse() -> Config {
         }
     } else if !duration_strs.is_empty() {
         let mut total = Duration::ZERO;
+        let mut infinite = false;
         for s in duration_strs {
+            if s.eq_ignore_ascii_case("inf") {
+                infinite = true;
+                continue;
+            }
             match parse_duration(&s) {
                 Ok(d) => {
                     total = total
@@ -98,7 +104,11 @@ pub fn parse() -> Config {
                 Err(e) => die_parse(b"duration", &s, e.as_str()),
             }
         }
-        SleepTarget::Duration(total)
+        if infinite {
+            SleepTarget::Infinite
+        } else {
+            SleepTarget::Duration(total)
+        }
     } else {
         die_with_usage(b"No duration or --until provided");
     };

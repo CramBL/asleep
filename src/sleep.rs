@@ -38,6 +38,11 @@ pub fn run_sleep(config: Config) -> i32 {
             break;
         }
 
+        if deadline == Deadline::Infinite {
+            thread::sleep(poll_duration);
+            continue;
+        }
+
         let remaining = match deadline {
             Deadline::Wall(deadline) => deadline
                 .duration_since(SystemTime::now())
@@ -45,6 +50,7 @@ pub fn run_sleep(config: Config) -> i32 {
             Deadline::Monotonic(deadline) => deadline
                 .checked_duration_since(Instant::now())
                 .unwrap_or(Duration::ZERO),
+            Deadline::Infinite => unreachable!(),
         };
 
         if remaining.is_zero() {
@@ -79,6 +85,7 @@ fn build_deadline(
         SleepTarget::Duration(duration) => {
             monotonic_now.checked_add(duration).map(Deadline::Monotonic)
         }
+        SleepTarget::Infinite => Some(Deadline::Infinite),
     }
 }
 
@@ -94,6 +101,7 @@ fn display_seconds(remaining: Duration) -> Seconds {
 enum Deadline {
     Wall(SystemTime),
     Monotonic(Instant),
+    Infinite,
 }
 
 fn deadline_overflow() -> i32 {
