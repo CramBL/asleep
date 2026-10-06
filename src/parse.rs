@@ -56,12 +56,13 @@ impl FromStr for SleepDuration {
             return Err(ParseDurationError::InvalidInput);
         }
 
+        let input = input.strip_prefix('+').unwrap_or(input);
+
         if input.parse::<InfiniteDuration>().is_ok() {
             return Ok(Self::Infinite);
         }
 
-        let finite = input.strip_prefix('+').unwrap_or(input);
-        match parse_duration_value(finite)? {
+        match parse_duration_value(input)? {
             DurationValue::Finite(duration) => Ok(Self::Finite(duration)),
             DurationValue::Saturated => Ok(Self::Saturated),
         }
@@ -801,6 +802,17 @@ mod tests {
             SleepDuration::Infinite
         );
         assert!("INFD".parse::<SleepDuration>().is_err());
+    }
+
+    #[rstest]
+    #[case::short("+inf")]
+    #[case::long("+infinity")]
+    #[case::suffixed("+INFd")]
+    fn test_positive_infinite_duration_forms(#[case] input: &str) {
+        assert_eq!(
+            input.parse::<SleepDuration>().unwrap(),
+            SleepDuration::Infinite
+        );
     }
 
     #[test]

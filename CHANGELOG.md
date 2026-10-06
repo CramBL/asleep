@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept a leading `+` on GNU sleep-compatible infinite duration operands.
+
 - Treat a lone `--` as a zero-duration sleep, matching GNU `sleep`.
 
 - Match GNU `sleep` operand whitespace handling by accepting leading whitespace and rejecting trailing whitespace.
