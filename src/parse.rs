@@ -65,7 +65,7 @@ impl FromStr for InfiniteDuration {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let number = match input.chars().next_back() {
-            Some(unit) if matches!(unit, 's' | 'S' | 'm' | 'M' | 'h' | 'H' | 'd' | 'D') => {
+            Some(unit) if matches!(unit, 's' | 'm' | 'h' | 'd') => {
                 &input[..input.len() - unit.len_utf8()]
             }
             _ => input,
@@ -165,6 +165,9 @@ impl std::str::FromStr for DurationNumber {
     type Err = ParseDurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized = crate::numeric_locale::normalize(s);
+        let s = normalized.as_ref();
+
         if s.is_empty()
             || s.starts_with('+')
             || s.starts_with('-')
@@ -745,9 +748,10 @@ mod tests {
             SleepDuration::Infinite
         );
         assert_eq!(
-            "INFD".parse::<SleepDuration>().unwrap(),
+            "INFd".parse::<SleepDuration>().unwrap(),
             SleepDuration::Infinite
         );
+        assert!("INFD".parse::<SleepDuration>().is_err());
     }
 
     #[test]

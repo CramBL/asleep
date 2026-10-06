@@ -40,12 +40,23 @@ fn is_gnu_sleep(path: &Path) -> bool {
     output.status.success() && String::from_utf8_lossy(&output.stdout).contains("GNU coreutils")
 }
 
-fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Outcome {
-    let mut child = Command::new(program)
+fn run_with_timeout(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
+    locale: Option<&str>,
+) -> Outcome {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(locale) = locale {
+        command.env("LC_ALL", locale);
+    }
+
+    let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("failed to run {}: {error}", program.display()));
     let deadline = Instant::now() + timeout;
@@ -71,20 +82,24 @@ fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Outcome
     }
 }
 
-fn compare_with_gnu(args: &[&str], timeout: Duration) -> Option<(Outcome, Outcome)> {
+fn compare_with_gnu(
+    args: &[&str],
+    timeout: Duration,
+    locale: Option<&str>,
+) -> Option<(Outcome, Outcome)> {
     let gnu = gnu_sleep()?;
     let asleep = PathBuf::from(assert_cmd::cargo::cargo_bin!("asleep"));
 
-    let reference = run_with_timeout(&gnu, args, timeout);
+    let reference = run_with_timeout(&gnu, args, timeout, locale);
     let mut asleep_args = args.to_vec();
     asleep_args.push("--no-progress");
-    let actual = run_with_timeout(&asleep, &asleep_args, timeout);
+    let actual = run_with_timeout(&asleep, &asleep_args, timeout, locale);
 
     Some((reference, actual))
 }
 
 fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
-    let Some((reference, actual)) = compare_with_gnu(args, timeout) else {
+    let Some((reference, actual)) = compare_with_gnu(args, timeout, None) else {
         return;
     };
 
@@ -102,6 +117,7 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::invalid(&["invalid"])]
 #[case::negative(&["-1"])]
 #[case::uppercase_suffix(&["42D"])]
+#[case::uppercase_infinite_suffix(&["INFD"])]
 #[case::extra_suffix_text(&["42d", "42day"])]
 #[case::nan(&["nan"])]
 #[case::empty(&[""])]
@@ -123,6 +139,8 @@ fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::multiple_units(&["1d", "2h", "3m", "4s"])]
 #[case::inf(&["inf"])]
 #[case::infinity(&["infinity"])]
+#[case::uppercase_inf(&["INF"])]
+#[case::uppercase_inf_with_lowercase_suffix(&["INFd"])]
 fn accepts_the_same_long_running_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::TimedOut, Duration::from_millis(100));
 }
@@ -133,4 +151,54 @@ fn accepts_the_same_long_running_operands_as_gnu_sleep(#[case] args: &[&str]) {
 fn accepts_gnu_hexadecimal_floating_point_operands(#[case] args: &[&str]) {
     // These are taken directly from GNU coreutils' sleep parameter tests.
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
+}
+
+fn comma_decimal_locale() -> Option<String> {
+    let output = Command::new("locale").arg("-a").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find(|locale| {
+            Command::new("locale")
+                .arg("decimal_point")
+                .env("LC_ALL", locale)
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .is_some_and(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .trim()
+                        .trim_matches('"')
+                        == ","
+                })
+        })
+        .map(str::to_owned)
+}
+
+#[rstest]
+#[case::current_locale_decimal("0,001")]
+#[case::c_locale_decimal("0.001")]
+fn accepts_current_and_c_locale_decimal_operands(#[case] operand: &str) {
+    let Some(locale) = comma_decimal_locale() else {
+        return;
+    };
+    let args = &[operand];
+    let Some((reference, actual)) =
+        compare_with_gnu(args, Duration::from_millis(500), Some(&locale))
+    else {
+        return;
+    };
+
+    assert_eq!(
+        reference,
+        Outcome::Success,
+        "unexpected GNU sleep behavior for {args:?} under {locale}"
+    );
+    assert_eq!(
+        actual, reference,
+        "asleep differs from GNU sleep for {args:?} under {locale}"
+    );
 }

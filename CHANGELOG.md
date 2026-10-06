@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Match GNU `sleep` by requiring lowercase unit suffixes on infinite durations.
+
+- Accept duration decimals in either the current numeric locale or the C locale, matching GNU sleep.
 - Accept GNU sleep-compatible hexadecimal floating-point durations.
 - Reject uppercase duration suffixes to match GNU sleep.
 - Accept GNU sleep-compatible leading `+` and `infinity` duration forms.
