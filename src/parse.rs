@@ -173,6 +173,10 @@ impl std::str::FromStr for DurationNumber {
             return Err(ParseDurationError::InvalidInput);
         }
 
+        if s.starts_with("0x") || s.starts_with("0X") {
+            return s.parse::<HexFloat>().map(|value| Self::Float(value.0));
+        }
+
         if s.contains('.') || s.contains('e') || s.contains('E') {
             s.parse::<f64>()
                 .map(Self::Float)
@@ -182,6 +186,27 @@ impl std::str::FromStr for DurationNumber {
                 .map(Self::Integer)
                 .map_err(|_| ParseDurationError::InvalidNumber)
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HexFloat(f64);
+
+impl FromStr for HexFloat {
+    type Err = ParseDurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized;
+        let input = if s.contains(['p', 'P']) {
+            s
+        } else {
+            normalized = format!("{s}p0");
+            &normalized
+        };
+
+        hexf_parse::parse_hexf64(input, false)
+            .map(Self)
+            .map_err(|_| ParseDurationError::InvalidNumber)
     }
 }
 
@@ -223,6 +248,10 @@ impl std::str::FromStr for DurationPart {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
             return Err(ParseDurationError::InvalidInput);
+        }
+
+        if let Ok(number) = s.parse::<DurationNumber>() {
+            return Self::from_number(number, DurationUnit::Seconds);
         }
 
         let (number, unit) = match s.char_indices().next_back() {
@@ -272,6 +301,10 @@ impl DurationPart {
 }
 
 fn parse_duration_chunk(chunk: &str) -> Result<Duration, ParseDurationError> {
+    if let Ok(part) = chunk.parse::<DurationPart>() {
+        return Ok(part.0);
+    }
+
     let mut total = Duration::ZERO;
     let mut start = 0;
 
@@ -662,6 +695,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[test]
     fn test_seconds_only() {
@@ -681,6 +715,15 @@ mod tests {
         assert_eq!(parse_duration("0.5s").unwrap(), Duration::from_millis(500));
         assert_eq!(parse_duration("1e-3").unwrap(), Duration::from_millis(1));
         assert_eq!(parse_duration("1.5m").unwrap(), Duration::from_secs(90));
+    }
+
+    #[rstest]
+    #[case::hex_fraction("0x.002p1", Duration::from_secs_f64(1.0 / 1024.0))]
+    #[case::hex_without_exponent("0x0.01d", Duration::from_secs_f64(29.0 / 4096.0))]
+    #[case::hex_digit_before_suffix("0x1ds", Duration::from_secs(29))]
+    #[case::hex_with_binary_exponent("0x1p-1s", Duration::from_millis(500))]
+    fn test_gnu_hexadecimal_numeric_formats(#[case] input: &str, #[case] expected: Duration) {
+        assert_eq!(parse_duration(input).unwrap(), expected);
     }
 
     #[test]

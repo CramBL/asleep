@@ -130,7 +130,6 @@ fn accepts_the_same_long_running_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[rstest]
 #[case::hex_fraction(&["0x.002p1"])]
 #[case::hex_digit_not_day_suffix(&["0x0.01d"])]
-#[ignore = "GNU compatibility gap: hexadecimal floating-point durations"]
 fn accepts_gnu_hexadecimal_floating_point_operands(#[case] args: &[&str]) {
     // These are taken directly from GNU coreutils' sleep parameter tests.
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));

@@ -20,6 +20,7 @@ license = false
 eula = false
 
 [dependencies]
+hexf-parse = "0.2.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.186"

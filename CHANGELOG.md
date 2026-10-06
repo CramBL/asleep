@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept GNU sleep-compatible hexadecimal floating-point durations.
 - Reject uppercase duration suffixes to match GNU sleep.
 - Accept GNU sleep-compatible leading `+` and `infinity` duration forms.
 - Accept GNU sleep-compatible fractional and scientific-notation durations, plus `inf` for indefinite sleeps.
