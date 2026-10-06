@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Reject uppercase duration suffixes to match GNU sleep.
 - Accept GNU sleep-compatible leading `+` and `infinity` duration forms.
 - Accept GNU sleep-compatible fractional and scientific-notation durations, plus `inf` for indefinite sleeps.
 - Preserve the absolute `--until` deadline so argument parsing and setup time cannot extend the sleep.

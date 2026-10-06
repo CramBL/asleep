@@ -195,7 +195,7 @@ enum DurationUnit {
 
 impl DurationUnit {
     fn from_suffix(suffix: char) -> Option<Self> {
-        match suffix.to_ascii_lowercase() {
+        match suffix {
             's' => Some(Self::Seconds),
             'm' => Some(Self::Minutes),
             'h' => Some(Self::Hours),
@@ -728,8 +728,9 @@ mod tests {
     }
 
     #[test]
-    fn test_case_insensitivity() {
-        assert_eq!(parse_duration("1H30M").unwrap(), Duration::from_secs(5400));
+    fn test_unit_suffixes_are_case_sensitive() {
+        assert!(parse_duration("1H30M").is_err());
+        assert!(parse_duration("42D").is_err());
     }
 
     #[test]
