@@ -2,6 +2,7 @@ use crate::datetime::{
     DateTime, Day, Hour24, Minute, Month, Second, Year, from_unix_timestamp, to_unix_timestamp,
 };
 use crate::utc_offset::utc_offset_seconds_at;
+use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -28,6 +29,52 @@ impl ParseDurationError {
 impl std::fmt::Display for ParseDurationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SleepDuration {
+    Finite(Duration),
+    Infinite,
+}
+
+impl FromStr for SleepDuration {
+    type Err = ParseDurationError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input.trim();
+        if input.is_empty() {
+            return Err(ParseDurationError::EmptyInput);
+        }
+
+        if input.parse::<InfiniteDuration>().is_ok() {
+            return Ok(Self::Infinite);
+        }
+
+        let finite = input.strip_prefix('+').unwrap_or(input);
+        parse_duration(finite).map(Self::Finite)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InfiniteDuration;
+
+impl FromStr for InfiniteDuration {
+    type Err = ParseDurationError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let number = match input.chars().next_back() {
+            Some(unit) if matches!(unit, 's' | 'S' | 'm' | 'M' | 'h' | 'H' | 'd' | 'D') => {
+                &input[..input.len() - unit.len_utf8()]
+            }
+            _ => input,
+        };
+
+        if number.eq_ignore_ascii_case("inf") || number.eq_ignore_ascii_case("infinity") {
+            Ok(Self)
+        } else {
+            Err(ParseDurationError::InvalidNumber)
+        }
     }
 }
 
@@ -487,6 +534,30 @@ mod tests {
         assert_eq!(parse_duration("0.5s").unwrap(), Duration::from_millis(500));
         assert_eq!(parse_duration("1e-3").unwrap(), Duration::from_millis(1));
         assert_eq!(parse_duration("1.5m").unwrap(), Duration::from_secs(90));
+    }
+
+    #[test]
+    fn test_additional_gnu_numeric_forms() {
+        assert_eq!(
+            "+0.5s".parse::<SleepDuration>().unwrap(),
+            SleepDuration::Finite(Duration::from_millis(500))
+        );
+        assert_eq!(
+            "+1e-3".parse::<SleepDuration>().unwrap(),
+            SleepDuration::Finite(Duration::from_millis(1))
+        );
+        assert_eq!(
+            "infinity".parse::<SleepDuration>().unwrap(),
+            SleepDuration::Infinite
+        );
+        assert_eq!(
+            "infinitys".parse::<SleepDuration>().unwrap(),
+            SleepDuration::Infinite
+        );
+        assert_eq!(
+            "INFD".parse::<SleepDuration>().unwrap(),
+            SleepDuration::Infinite
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::duration::PollInterval;
-use crate::parse::{parse_datetime, parse_duration, parse_offset};
+use crate::parse::{SleepDuration, parse_datetime, parse_offset};
 use std::env;
 use std::io::{self, Write};
 use std::time::{Duration, SystemTime};
@@ -91,16 +91,13 @@ pub fn parse() -> Config {
         let mut total = Duration::ZERO;
         let mut infinite = false;
         for s in duration_strs {
-            if s.eq_ignore_ascii_case("inf") {
-                infinite = true;
-                continue;
-            }
-            match parse_duration(&s) {
-                Ok(d) => {
+            match s.parse::<SleepDuration>() {
+                Ok(SleepDuration::Finite(duration)) => {
                     total = total
-                        .checked_add(d)
+                        .checked_add(duration)
                         .unwrap_or_else(|| die_parse(b"duration", &s, "Duration overflow"));
                 }
+                Ok(SleepDuration::Infinite) => infinite = true,
                 Err(e) => die_parse(b"duration", &s, e.as_str()),
             }
         }
