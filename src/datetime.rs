@@ -18,6 +18,13 @@ pub struct TimeOfDay {
     pub second: Second,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CalendarDate {
+    pub year: Year,
+    pub month: Month,
+    pub day: Day,
+}
+
 impl TimeOfDay {
     pub const MIDNIGHT: Self = Self {
         hour: Hour24(0),

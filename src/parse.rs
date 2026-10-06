@@ -1,6 +1,6 @@
 use crate::datetime::{
-    DateTime, Day, Hour24, Minute, Month, Second, TimeOfDay, UtcOffset, Year, from_unix_timestamp,
-    to_unix_timestamp,
+    CalendarDate, DateTime, Day, Hour24, Minute, Month, Second, TimeOfDay, UtcOffset, Year,
+    from_unix_timestamp, to_unix_timestamp,
 };
 use crate::utc_offset::utc_offset_seconds_at;
 use std::str::FromStr;
@@ -351,6 +351,27 @@ impl Meridiem {
     }
 }
 
+impl FromStr for CalendarDate {
+    type Err = ParseDateTimeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split('-');
+        let year = parts.next().ok_or(ParseDateTimeError::InvalidFormat)?;
+        let month = parts.next().ok_or(ParseDateTimeError::InvalidFormat)?;
+        let day = parts.next().ok_or(ParseDateTimeError::InvalidFormat)?;
+        if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+            return Err(ParseDateTimeError::InvalidFormat);
+        }
+
+        let year = parse_u64(year).ok_or(ParseDateTimeError::InvalidFormat)? as i32;
+        let year = Year(year);
+        let month = Month::new(parse_u8(month)?).ok_or(ParseDateTimeError::InvalidValue)?;
+        let day = Day::new(parse_u8(day)?, year, month).ok_or(ParseDateTimeError::InvalidValue)?;
+
+        Ok(Self { year, month, day })
+    }
+}
+
 impl FromStr for TimeOfDay {
     type Err = ParseDateTimeError;
 
@@ -473,46 +494,40 @@ where
         return target_tomorrow_time(now_ts_utc, time_part, &mut utc_offset_at);
     }
 
-    if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
-        if s.len() > 10 && s.as_bytes().get(10) != Some(&b' ') {
-            return Err(ParseDateTimeError::InvalidFormat);
-        }
+    let (date_part, time_part) = match s.split_once(' ') {
+        Some((date, time)) => (date, (!time.is_empty()).then_some(time)),
+        None => (s, None),
+    };
+    match date_part.parse::<CalendarDate>() {
+        Ok(date) => {
+            let time_spec = match time_part {
+                Some(time) => time.parse::<TimeSpec>()?,
+                None => TimeSpec {
+                    time: TimeOfDay::MIDNIGHT,
+                    offset: None,
+                },
+            };
 
-        let year = parse_u64(s.get(0..4).ok_or(ParseDateTimeError::InvalidFormat)?)
-            .ok_or(ParseDateTimeError::InvalidFormat)? as i32;
-        let month = parse_u8(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)?;
-        let day = parse_u8(s.get(8..10).ok_or(ParseDateTimeError::InvalidFormat)?)?;
+            let target_dt = DateTime {
+                year: date.year,
+                month: date.month,
+                day: date.day,
+                hour: time_spec.time.hour,
+                minute: time_spec.time.minute,
+                second: time_spec.time.second,
+            };
 
-        let time_spec = if s.len() > 11 {
-            let time_part = s.get(11..).ok_or(ParseDateTimeError::InvalidFormat)?;
-            time_part.parse::<TimeSpec>()?
-        } else {
-            TimeSpec {
-                time: TimeOfDay::MIDNIGHT,
-                offset: None,
+            let ts_utc = target_to_utc(target_dt, time_spec.offset, &mut utc_offset_at)?;
+            let target = UNIX_EPOCH
+                .checked_add(Duration::from_secs(ts_utc))
+                .ok_or(ParseDateTimeError::Overflow)?;
+            if target <= now {
+                return Err(ParseDateTimeError::PastTime);
             }
-        };
-
-        let y = Year(year);
-        let m = Month::new(month).ok_or(ParseDateTimeError::InvalidValue)?;
-        let d = Day::new(day, y, m).ok_or(ParseDateTimeError::InvalidValue)?;
-        let target_dt = DateTime {
-            year: y,
-            month: m,
-            day: d,
-            hour: time_spec.time.hour,
-            minute: time_spec.time.minute,
-            second: time_spec.time.second,
-        };
-
-        let ts_utc = target_to_utc(target_dt, time_spec.offset, &mut utc_offset_at)?;
-        let target = UNIX_EPOCH
-            .checked_add(Duration::from_secs(ts_utc))
-            .ok_or(ParseDateTimeError::Overflow)?;
-        if target <= now {
-            return Err(ParseDateTimeError::PastTime);
+            return Ok(target);
         }
-        return Ok(target);
+        Err(ParseDateTimeError::InvalidValue) => return Err(ParseDateTimeError::InvalidValue),
+        Err(_) => {}
     }
 
     if let Ok(time_spec) = s.parse::<TimeSpec>() {
@@ -816,6 +831,46 @@ mod tests {
         .unwrap();
 
         assert_eq!(target, UNIX_EPOCH + Duration::from_secs(1793523600));
+    }
+
+    #[test]
+    fn test_calendar_date() {
+        assert_eq!(
+            "2026-04-23".parse::<CalendarDate>().unwrap(),
+            CalendarDate {
+                year: Year(2026),
+                month: Month(4),
+                day: Day(23),
+            }
+        );
+    }
+
+    #[test]
+    fn test_calendar_date_rejects_invalid_values() {
+        assert_eq!(
+            "2026-02-30".parse::<CalendarDate>(),
+            Err(ParseDateTimeError::InvalidValue)
+        );
+        assert_eq!(
+            "2026-13-01".parse::<CalendarDate>(),
+            Err(ParseDateTimeError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn test_calendar_date_rejects_invalid_format() {
+        assert_eq!(
+            "2026/04/23".parse::<CalendarDate>(),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
+        assert_eq!(
+            "2026-4-23".parse::<CalendarDate>(),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
+        assert_eq!(
+            "2026-04-23X".parse::<CalendarDate>(),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
     }
 
     #[test]
