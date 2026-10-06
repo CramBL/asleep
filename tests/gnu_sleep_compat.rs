@@ -122,6 +122,7 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::extra_suffix_text(&["42d", "42day"])]
 #[case::nan(&["nan"])]
 #[case::empty(&[""])]
+#[case::missing_operand(&[])]
 #[case::trailing_whitespace(&["0.001 "])]
 fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Failure, Duration::from_millis(250));
