@@ -165,6 +165,10 @@ where
     }
 
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
+        if s.len() > 10 && s.as_bytes().get(10) != Some(&b' ') {
+            return Err(ParseDateTimeError::InvalidFormat);
+        }
+
         let year = parse_u64(s.get(0..4).ok_or(ParseDateTimeError::InvalidFormat)?)
             .ok_or(ParseDateTimeError::InvalidFormat)? as i32;
         let month = parse_u8(s.get(5..7).ok_or(ParseDateTimeError::InvalidFormat)?)?;
@@ -541,6 +545,18 @@ mod tests {
             std::panic::catch_unwind(|| parse_datetime("@18446744073709551615", UNIX_EPOCH));
 
         assert!(matches!(result, Ok(Err(ParseDateTimeError::Overflow))));
+    }
+
+    #[test]
+    fn test_parse_datetime_rejects_invalid_full_date_separators() {
+        assert_eq!(
+            parse_datetime_with("2099-01-01X", UNIX_EPOCH, |_| Ok(0)),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
+        assert_eq!(
+            parse_datetime_with("2099-01-01X12:00", UNIX_EPOCH, |_| Ok(0)),
+            Err(ParseDateTimeError::InvalidFormat)
+        );
     }
 
     #[test]
