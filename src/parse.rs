@@ -48,11 +48,7 @@ impl FromStr for SleepDuration {
         if input.is_empty() {
             return Err(ParseDurationError::EmptyInput);
         }
-        if input
-            .chars()
-            .next_back()
-            .is_some_and(|ch| ch.is_ascii_whitespace())
-        {
+        if input.chars().any(|ch| ch.is_ascii_whitespace()) {
             return Err(ParseDurationError::InvalidInput);
         }
 
@@ -981,6 +977,14 @@ mod tests {
     #[case::finite("+ 0")]
     #[case::infinite("+ inf")]
     fn test_positive_sign_must_be_attached(#[case] input: &str) {
+        assert!(input.parse::<SleepDuration>().is_err());
+    }
+
+    #[rstest]
+    #[case::space("0 0")]
+    #[case::tab("0\t0")]
+    #[case::compound("1h 30m")]
+    fn test_cli_duration_rejects_internal_whitespace(#[case] input: &str) {
         assert!(input.parse::<SleepDuration>().is_err());
     }
 
