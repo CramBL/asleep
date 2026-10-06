@@ -141,6 +141,9 @@ fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::infinity(&["infinity"])]
 #[case::uppercase_inf(&["INF"])]
 #[case::uppercase_inf_with_lowercase_suffix(&["INFd"])]
+#[case::huge_scientific(&["1e400"])]
+#[case::beyond_u64_seconds(&["18446744073709551616"])]
+#[case::huge_unit_scaled_integer(&["9999999999999999999d"])]
 fn accepts_the_same_long_running_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::TimedOut, Duration::from_millis(100));
 }

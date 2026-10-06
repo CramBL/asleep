@@ -36,6 +36,7 @@ impl std::fmt::Display for ParseDurationError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SleepDuration {
     Finite(Duration),
+    Saturated,
     Infinite,
 }
 
@@ -53,7 +54,23 @@ impl FromStr for SleepDuration {
         }
 
         let finite = input.strip_prefix('+').unwrap_or(input);
-        parse_duration(finite).map(Self::Finite)
+        match parse_duration_value(finite)? {
+            DurationValue::Finite(duration) => Ok(Self::Finite(duration)),
+            DurationValue::Saturated => Ok(Self::Saturated),
+        }
+    }
+}
+
+impl SleepDuration {
+    pub fn saturating_add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Infinite, _) | (_, Self::Infinite) => Self::Infinite,
+            (Self::Saturated, _) | (_, Self::Saturated) => Self::Saturated,
+            (Self::Finite(left), Self::Finite(right)) => left
+                .checked_add(right)
+                .map(Self::Finite)
+                .unwrap_or(Self::Saturated),
+        }
     }
 }
 
@@ -185,9 +202,13 @@ impl std::str::FromStr for DurationNumber {
                 .map(Self::Float)
                 .map_err(|_| ParseDurationError::InvalidNumber)
         } else {
-            s.parse::<u64>()
-                .map(Self::Integer)
-                .map_err(|_| ParseDurationError::InvalidNumber)
+            match s.parse::<u64>() {
+                Ok(value) => Ok(Self::Integer(value)),
+                Err(_) => s
+                    .parse::<f64>()
+                    .map(Self::Float)
+                    .map_err(|_| ParseDurationError::InvalidNumber),
+            }
         }
     }
 }
@@ -242,8 +263,26 @@ impl DurationUnit {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurationValue {
+    Finite(Duration),
+    Saturated,
+}
+
+impl DurationValue {
+    fn saturating_add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Saturated, _) | (_, Self::Saturated) => Self::Saturated,
+            (Self::Finite(left), Self::Finite(right)) => left
+                .checked_add(right)
+                .map(Self::Finite)
+                .unwrap_or(Self::Saturated),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-struct DurationPart(Duration);
+struct DurationPart(DurationValue);
 
 impl std::str::FromStr for DurationPart {
     type Err = ParseDurationError;
@@ -287,15 +326,17 @@ impl DurationPart {
     fn from_number(number: DurationNumber, unit: DurationUnit) -> Result<Self, ParseDurationError> {
         let multiplier = unit.multiplier();
         let duration = match number {
-            DurationNumber::Integer(value) => {
-                let seconds = value
-                    .checked_mul(multiplier)
-                    .ok_or(ParseDurationError::Overflow)?;
-                Duration::from_secs(seconds)
-            }
+            DurationNumber::Integer(value) => match value.checked_mul(multiplier) {
+                Some(seconds) => DurationValue::Finite(Duration::from_secs(seconds)),
+                None => DurationValue::Saturated,
+            },
             DurationNumber::Float(value) => {
                 let seconds = value * multiplier as f64;
-                Duration::try_from_secs_f64(seconds).map_err(|_| ParseDurationError::Overflow)?
+                match Duration::try_from_secs_f64(seconds) {
+                    Ok(duration) => DurationValue::Finite(duration),
+                    Err(_) if seconds.is_sign_positive() => DurationValue::Saturated,
+                    Err(_) => return Err(ParseDurationError::Overflow),
+                }
             }
         };
 
@@ -303,12 +344,12 @@ impl DurationPart {
     }
 }
 
-fn parse_duration_chunk(chunk: &str) -> Result<Duration, ParseDurationError> {
+fn parse_duration_chunk(chunk: &str) -> Result<DurationValue, ParseDurationError> {
     if let Ok(part) = chunk.parse::<DurationPart>() {
         return Ok(part.0);
     }
 
-    let mut total = Duration::ZERO;
+    let mut total = DurationValue::Finite(Duration::ZERO);
     let mut start = 0;
 
     for (index, ch) in chunk.char_indices() {
@@ -318,17 +359,13 @@ fn parse_duration_chunk(chunk: &str) -> Result<Duration, ParseDurationError> {
 
         let end = index + ch.len_utf8();
         let part = chunk[start..end].parse::<DurationPart>()?;
-        total = total
-            .checked_add(part.0)
-            .ok_or(ParseDurationError::Overflow)?;
+        total = total.saturating_add(part.0);
         start = end;
     }
 
     if start < chunk.len() {
         let part = chunk[start..].parse::<DurationPart>()?;
-        total = total
-            .checked_add(part.0)
-            .ok_or(ParseDurationError::Overflow)?;
+        total = total.saturating_add(part.0);
     } else if start == 0 {
         return Err(ParseDurationError::InvalidInput);
     }
@@ -336,18 +373,23 @@ fn parse_duration_chunk(chunk: &str) -> Result<Duration, ParseDurationError> {
     Ok(total)
 }
 
-pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
+fn parse_duration_value(s: &str) -> Result<DurationValue, ParseDurationError> {
     let s = s.trim();
     if s.is_empty() {
         return Err(ParseDurationError::EmptyInput);
     }
 
     s.split_ascii_whitespace()
-        .try_fold(Duration::ZERO, |total, chunk| {
-            total
-                .checked_add(parse_duration_chunk(chunk)?)
-                .ok_or(ParseDurationError::Overflow)
+        .try_fold(DurationValue::Finite(Duration::ZERO), |total, chunk| {
+            Ok(total.saturating_add(parse_duration_chunk(chunk)?))
         })
+}
+
+pub fn parse_duration(s: &str) -> Result<Duration, ParseDurationError> {
+    match parse_duration_value(s)? {
+        DurationValue::Finite(duration) => Ok(duration),
+        DurationValue::Saturated => Err(ParseDurationError::Overflow),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -792,16 +834,16 @@ mod tests {
         assert!(parse_duration("1x").err().is_some());
     }
 
-    #[test]
-    fn test_overflow() {
+    #[rstest]
+    #[case::huge_scientific("1e400")]
+    #[case::beyond_u64_seconds("18446744073709551616")]
+    #[case::huge_unit_scaled_integer("9999999999999999999d")]
+    fn test_gnu_huge_durations_saturate(#[case] input: &str) {
         assert_eq!(
-            parse_duration("1000000000000000000000d").err(),
-            Some(ParseDurationError::InvalidNumber)
+            input.parse::<SleepDuration>().unwrap(),
+            SleepDuration::Saturated
         );
-        assert_eq!(
-            parse_duration("9999999999999999999d").err(),
-            Some(ParseDurationError::Overflow)
-        );
+        assert_eq!(parse_duration(input), Err(ParseDurationError::Overflow));
     }
 
     #[test]

@@ -48,12 +48,10 @@ fn test_huge_timestamp_returns_error() {
 }
 
 #[test]
-fn test_multiple_duration_overflow_returns_error() {
+fn test_multiple_duration_overflow_saturates() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
-    cmd.args(["18446744073709551615s", "1s", "--no-progress"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Duration overflow"));
+    cmd.args(["18446744073709551615s", "1s", "--no-progress"]);
+    assert_interrupted(cmd, Duration::from_millis(200));
 }
 
 #[test]

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Saturate GNU sleep-compatible oversized finite durations instead of rejecting them.
+
 - Match GNU `sleep` by requiring lowercase unit suffixes on infinite durations.
 
 - Accept duration decimals in either the current numeric locale or the C locale, matching GNU sleep.

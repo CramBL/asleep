@@ -89,23 +89,16 @@ pub fn parse() -> Config {
             Err(e) => die_parse(b"datetime", &s, e.as_str()),
         }
     } else if !duration_strs.is_empty() {
-        let mut total = Duration::ZERO;
-        let mut infinite = false;
+        let mut total = SleepDuration::Finite(Duration::ZERO);
         for s in duration_strs {
-            match s.parse::<SleepDuration>() {
-                Ok(SleepDuration::Finite(duration)) => {
-                    total = total
-                        .checked_add(duration)
-                        .unwrap_or_else(|| die_parse(b"duration", &s, "Duration overflow"));
-                }
-                Ok(SleepDuration::Infinite) => infinite = true,
-                Err(e) => die_parse(b"duration", &s, e.as_str()),
-            }
+            let duration = s
+                .parse::<SleepDuration>()
+                .unwrap_or_else(|e| die_parse(b"duration", &s, e.as_str()));
+            total = total.saturating_add(duration);
         }
-        if infinite {
-            SleepTarget::Infinite
-        } else {
-            SleepTarget::Duration(total)
+        match total {
+            SleepDuration::Finite(duration) => SleepTarget::Duration(duration),
+            SleepDuration::Saturated | SleepDuration::Infinite => SleepTarget::Infinite,
         }
     } else {
         die_with_usage(b"No duration or --until provided");
