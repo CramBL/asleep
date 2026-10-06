@@ -39,6 +39,21 @@ fn test_invalid_duration() {
 }
 
 #[test]
+fn test_end_of_options_marker() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["--no-progress", "--", "0"]).assert().success();
+}
+
+#[test]
+fn test_end_of_options_treats_negative_value_as_duration() {
+    let mut cmd = Command::cargo_bin("asleep").unwrap();
+    cmd.args(["--", "-1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Error parsing duration"));
+}
+
+#[test]
 fn test_huge_timestamp_returns_error() {
     let mut cmd = Command::cargo_bin("asleep").unwrap();
     cmd.args(["--until", "@18446744073709551615"])

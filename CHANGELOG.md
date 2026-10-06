@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept the GNU-style `--` end-of-options marker before duration operands.
+
 - Saturate GNU sleep-compatible oversized finite durations instead of rejecting them.
 
 - Match GNU `sleep` by requiring lowercase unit suffixes on infinite durations.

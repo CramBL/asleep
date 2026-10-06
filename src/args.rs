@@ -29,10 +29,17 @@ pub fn parse() -> Config {
     let mut duration_strs: Vec<String> = Vec::new();
     let mut until_parts: Vec<String> = Vec::new();
     let mut until_flag_seen = false;
+    let mut options_ended = false;
     let poll_interval = PollInterval(crate::duration::Seconds(1));
 
     while let Some(s) = args.next() {
+        if options_ended {
+            duration_strs.push(s);
+            continue;
+        }
+
         match s.as_str() {
+            "--" => options_ended = true,
             "-h" | "--help" => {
                 print_usage(&mut io::stdout().lock());
                 std::process::exit(0);

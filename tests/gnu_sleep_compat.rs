@@ -91,8 +91,9 @@ fn compare_with_gnu(
     let asleep = PathBuf::from(assert_cmd::cargo::cargo_bin!("asleep"));
 
     let reference = run_with_timeout(&gnu, args, timeout, locale);
-    let mut asleep_args = args.to_vec();
+    let mut asleep_args = Vec::with_capacity(args.len() + 1);
     asleep_args.push("--no-progress");
+    asleep_args.extend_from_slice(args);
     let actual = run_with_timeout(&asleep, &asleep_args, timeout, locale);
 
     Some((reference, actual))
@@ -131,6 +132,7 @@ fn rejects_the_same_invalid_operands_as_gnu_sleep(#[case] args: &[&str]) {
 #[case::scientific(&["1e-3"])]
 #[case::leading_plus(&["+0.001"])]
 #[case::multiple_zero_units(&["0d", "0h", "0m", "0s"])]
+#[case::end_of_options(&["--", "0"])]
 fn accepts_the_same_short_numeric_operands_as_gnu_sleep(#[case] args: &[&str]) {
     assert_compatible(args, Outcome::Success, Duration::from_millis(500));
 }
