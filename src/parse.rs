@@ -119,30 +119,12 @@ impl FromStr for NegativeZeroDuration {
             &input[..index]
         };
 
-        number.parse::<DurationNumber>()?;
-        if is_exact_zero(number) {
+        if number.parse::<DurationNumber>()?.is_zero() {
             Ok(Self)
         } else {
             Err(ParseDurationError::InvalidInput)
         }
     }
-}
-
-fn is_exact_zero(number: &str) -> bool {
-    let significand = if let Some(hex) = number
-        .strip_prefix("0x")
-        .or_else(|| number.strip_prefix("0X"))
-    {
-        hex.split(['p', 'P']).next().unwrap_or(hex)
-    } else {
-        number.split(['e', 'E']).next().unwrap_or(number)
-    };
-
-    let mut digits = significand.chars().filter(|ch| *ch != '.');
-    let Some(first) = digits.next() else {
-        return false;
-    };
-    first == '0' && digits.all(|ch| ch == '0')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,6 +231,15 @@ enum DurationNumber {
     Float(f64),
 }
 
+impl DurationNumber {
+    fn is_zero(self) -> bool {
+        match self {
+            Self::Integer(value) => value == 0,
+            Self::Float(value) => value == 0.0,
+        }
+    }
+}
+
 impl std::str::FromStr for DurationNumber {
     type Err = ParseDurationError;
 
@@ -339,6 +330,11 @@ impl FromStr for HexFloat {
                 let exponent = exponent.parse::<HexExponent>()?;
 
                 match exponent {
+                    HexExponent::InRange(exponent) if exponent < -2098 => {
+                        hexf_parse::parse_hexf64(&format!("{significand}p0"), false)
+                            .map_err(|_| ParseDurationError::InvalidNumber)?;
+                        Ok(Self(0.0))
+                    }
                     HexExponent::InRange(exponent) if exponent < -1074 => {
                         let scaled_exponent = exponent
                             .checked_add(1074)
@@ -921,6 +917,7 @@ mod tests {
 
     #[rstest]
     #[case::subnormal_boundary("0x1p-1075")]
+    #[case::far_underflow("0x1p-99999")]
     #[case::extreme_exponent("0x1p-999999999999999999999999")]
     #[case::zero_with_extreme_positive_exponent("0x0p999999999999999999999999")]
     fn test_gnu_hexadecimal_positive_underflow(#[case] input: &str) {
@@ -1003,12 +1000,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_negative_nonzero_duration_is_rejected() {
+        assert!("-1".parse::<SleepDuration>().is_err());
+    }
+
     #[rstest]
-    #[case::nonzero("-1")]
-    #[case::decimal_underflow("-1e-9999")]
-    #[case::hex_underflow("-0x1p-99999")]
-    fn test_negative_nonzero_duration_forms_are_rejected(#[case] input: &str) {
-        assert!(input.parse::<SleepDuration>().is_err());
+    #[case::decimal("-1e-9999")]
+    #[case::hexadecimal("-0x1p-99999")]
+    fn test_negative_underflow_rounds_to_zero(#[case] input: &str) {
+        assert_eq!(
+            input.parse::<SleepDuration>().unwrap(),
+            SleepDuration::Finite(Duration::ZERO)
+        );
     }
 
     #[test]

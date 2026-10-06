@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Accept negative duration values that underflow to zero, matching current GNU `sleep`.
 - Correct the MSI feature description so it no longer claims that a disabled license sidecar is installed.
 - Reject compound durations within a single CLI operand, matching GNU `sleep`; pass each duration as a separate operand.
 - Reject internal whitespace within a single duration operand, matching GNU `sleep`.

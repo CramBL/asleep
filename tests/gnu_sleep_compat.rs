@@ -7,9 +7,11 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-// Reference behavior is derived from GNU coreutils' tests/misc/sleep.sh and
-// checked differentially against an installed GNU sleep. The upstream snapshot
-// used when this suite was introduced was coreutils master at
+// Stable reference behavior is derived from GNU coreutils' tests/misc/sleep.sh
+// and checked differentially against the installed GNU sleep. Version-sensitive
+// edge cases are covered by direct parser tests instead of assuming every
+// installed coreutils release behaves like current upstream. The upstream
+// snapshot used when this suite was introduced was coreutils master at
 // e6c09ec0b1b590a77a3736c23bf888c4cb13f438.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,8 +126,6 @@ fn assert_compatible(args: &[&str], expected: Outcome, timeout: Duration) {
 #[case::empty(&[""])]
 #[case::missing_operand(&[])]
 #[case::trailing_whitespace(&["0.001 "])]
-#[case::negative_decimal_underflow(&["--", "-1e-9999"])]
-#[case::negative_hex_underflow(&["--", "-0x1p-99999"])]
 #[case::separated_positive_sign(&["+ 0"])]
 #[case::separated_positive_infinity_sign(&["+ inf"])]
 #[case::internal_space(&["0 0"])]
